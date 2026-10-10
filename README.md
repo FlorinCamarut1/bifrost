@@ -110,7 +110,8 @@ npx electron-builder --linux AppImage deb --publish never  # Linux
 Releases (Windows + Linux) are built by GitHub Actions when a `v*` tag is pushed (`.github/workflows/release.yml`).
 
 Test hooks: `--data=<dir>` (separate settings/profiles), `--hidden`, `--run=<action>[:<json>|:@file]`,
-`--shot=<dir> --pages=a,b` (screenshots, rendered off-screen).
+`--shot=<dir> --pages=a,b` (screenshots, rendered off-screen), `--perf` (startup marks, CPU and memory every 10 s),
+`--perf-close=<s>` (closes the window to the tray after <s> s).
 
 `server.json`: `{ schema, app: "bifrost", server: { name, world, joinCode, address }, required: [{ full, ver }],
 recommended: [{ full, ver }], nexus: [{ key, title, modId, fileId, version, required }] }`.

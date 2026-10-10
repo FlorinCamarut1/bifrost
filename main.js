@@ -20,6 +20,10 @@ if (app.isPackaged && !global.__bifrostInner) {
 
 const { BrowserWindow, Tray, Menu, ipcMain, Notification, shell, nativeImage, safeStorage, clipboard, protocol, net, dialog } = require('electron');
 const LINUX = process.platform === 'linux';
+// test hook: --perf prints startup marks and, every 10 s, the CPU and memory of all Bifrost processes
+const PERF = process.argv.includes('--perf');
+const perf = m => { if (PERF) console.log(`[perf] ${Math.round(process.uptime() * 1000)}ms ${m}`); };
+perf('main.js loaded');
 // AppImage: Chromium's setuid sandbox helper cannot work from the read-only mount (and Ubuntu 24.04 blocks the other one)
 if (LINUX && process.env.APPIMAGE) app.commandLine.appendSwitch('no-sandbox');
 const crypto = require('crypto');
@@ -33,6 +37,7 @@ const { makeTransport, walk } = require('./lib/transport');
 const { syncMods } = require('./lib/modsync');
 const { syncConfigs, SKIP: CFG_SKIP, safeRel } = require('./lib/serversync');
 const bepcfg = require('./lib/bepcfg');
+const { metadata: dllMetadata } = require('./lib/dllmeta');
 const a2s = require('./lib/a2s');
 const tsprofile = require('./lib/tsprofile');
 const importers = require('./lib/importers');
@@ -160,7 +165,13 @@ const publicSettings = () => {
 // WINDOW / TRAY / LOG
 // =====================================================================================================
 let win = null, tray = null, quitting = false;
-const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send('event', ch, data); };
+// a window that is still loading gets its toasts once the page is up (state comes with 'init' anyway)
+let winLoaded = false, pendingToasts = [];
+const send = (ch, data) => {
+  if (!win || win.isDestroyed()) return;
+  if (!winLoaded) { if (ch === 'toast') pendingToasts.push(data); return; }
+  win.webContents.send('event', ch, data);
+};
 function notify(title, body, kind) {
   if (!G.notifications || !Notification.isSupported()) return;
   const n = new Notification({ title: tr(title), body: String(body || '').split('\n').map(tr).join('\n'), icon: ICON, silent: kind !== 'warn' });
@@ -172,6 +183,21 @@ function showWindow() {
   if (!win || win.isDestroyed()) createWindow(true);
   else { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
 }
+// a window left hidden in the tray is closed for real after a while: its page and GPU process are ~200 MB, and the
+// tray / a notification / a link opens a new one in a fraction of a second (unsaved config edits keep it)
+let unloadTimer = null;
+function scheduleUnload() {
+  clearTimeout(unloadTimer);
+  unloadTimer = setTimeout(async () => {
+    if (!win || win.isDestroyed() || win.isVisible() || quitting) return;
+    let dirty = false;
+    try { dirty = await win.webContents.executeJavaScript('typeof cfgDirty === "function" && cfgDirty()'); } catch { }
+    if (!win || win.isDestroyed() || win.isVisible()) return;
+    if (dirty) { scheduleUnload(); return; }
+    perf('hidden window closed');
+    win.destroy(); win = null;
+  }, PERF ? 15e3 : 5 * 60e3);
+}
 function createWindow(show) {
   const shotMode = process.argv.some(x => x.startsWith('--shot='));
   win = new BrowserWindow({
@@ -181,8 +207,11 @@ function createWindow(show) {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, backgroundThrottling: !shotMode },
   });
   win.removeMenu();
+  winLoaded = false;
+  win.webContents.on('did-start-loading', () => { winLoaded = false; });
+  win.webContents.on('did-finish-load', () => { winLoaded = true; for (const t of pendingToasts.splice(0)) send('toast', t); });
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
-  win.once('ready-to-show', () => { if (shotMode) win.showInactive(); else if (show) win.show(); });
+  win.once('ready-to-show', () => { perf('window ready-to-show'); if (shotMode) win.showInactive(); else if (show) win.show(); });
   // test hook: --shot=<dir> --pages=a,b saves a screenshot of every page once the data is in
   const shot = (process.argv.find(a => a.startsWith('--shot=')) || '').slice(7);
   if (shot) win.webContents.once('did-finish-load', () => setTimeout(async () => {
@@ -199,9 +228,9 @@ function createWindow(show) {
   win.on('close', e => {
     if (quitting) return;
     // admins keep it in the tray (auto-sync); a player who closes it is done
-    if (G.servers.some(s => s.role === 'admin') || G.startWithWindows) { e.preventDefault(); win.hide(); } else quitting = true;
+    if (G.servers.some(s => s.role === 'admin') || G.startWithWindows) { e.preventDefault(); win.hide(); scheduleUnload(); perf('window hidden to the tray'); } else quitting = true;
   });
-  win.on('show', () => pollStatus());
+  win.on('show', () => { clearTimeout(unloadTimer); pollStatus(); checkGameProcess(); });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', e => e.preventDefault());
 }
@@ -519,6 +548,8 @@ function playerInfo() {
     required: manifest ? manifest.required.length + (manifest.nexus || []).filter(n => n.required).length : 0,
     installed: Object.keys(pr.packages).length, nexusWaiting: nexusWaiting.map(n => ({ key: n.key, title: n.title, modId: n.modId, fileId: n.fileId })),
     nexusUser: G.nexusUser, recommended: s.recommended, nexusChosen: s.nexusChosen,
+    // icons of the admin's recommendations, so the Play page does not need the whole catalog
+    icons: Object.fromEntries((manifest?.recommended || []).map(r => [r.full, catalogIndex.get(r.full)?.icon || null])),
   };
 }
 // is Valheim running? (one game at a time: a second PLAY must not start another copy)
@@ -672,7 +703,7 @@ function signature() {
 }
 
 async function confirmMass(list) {
-  if (!win) return false;
+  showWindow();
   const r = await dialog.showMessageBox(win, {
     type: 'warning', buttons: ['Anulează', 'Scoate-le de pe server'], defaultId: 0, cancelId: 0, title: 'Bifrost',
     message: `S-ar scoate ${list.length} moduri de pe server`, detail: `${list.join(', ')}\n\nUn profil gol sau greșit arată exact așa. Continui?`,
@@ -855,10 +886,11 @@ async function configOwners(rels) {
   const tokens = names.map(n => n.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 3));
   for (const [k, p] of Object.entries(pr.packages)) {
     for (const f of (p.files || []).filter(x => /\.dll$/i.test(x))) {
-      let txt;
-      try { txt = fs.readFileSync(path.join(pr.dir, ...f.split('/'))).toString('latin1'); } catch { continue; }
+      // only the assembly's metadata (names, attribute blobs): some mods embed 100+ MB of assets in their DLL
+      const md = dllMetadata(path.join(pr.dir, ...f.split('/')));
+      if (!md.length) continue;
       rels.forEach((r, i) => {
-        if (names[i].length < 4 || !txt.includes(names[i])) return;
+        if (names[i].length < 4 || md.indexOf(names[i], 0, 'latin1') < 0) return;
         const score = tokens[i].filter(t => k.toLowerCase().includes(t)).length;
         if (!best.has(r) || score > best.get(r).score) best.set(r, { key: k, score });
       });
@@ -887,11 +919,19 @@ function configRels() {
   try { return walk(configDir()).filter(r => safeRel(r) && !CFG_SKIP.some(x => x.test(r))).sort((a, b) => (/\.cfg$/i.test(b) - /\.cfg$/i.test(a)) || a.localeCompare(b)); } catch { return []; }
 }
 function configSig(rels) { const pr = getProfile(); return JSON.stringify([srv()?.id, Object.entries(pr.packages).map(([k, p]) => `${k}@${p.ver}`).sort(), rels]); }
+// kept on disk too: it only changes when mods or config files do
+const cfgIndexFile = () => path.join(serverDir(srv().id), 'config-owners.json');
 async function configIndex() {
   const rels = configRels(), sig = configSig(rels);
   if (cfgIndex.sig === sig && cfgIndex.owners) return cfgIndex;
   if (cfgIndex.building?.sig === sig) { await cfgIndex.building.p; return cfgIndex; }
-  const p = configOwners(rels).then(own => { cfgIndex.owners = new Map(rels.map(r => [r, own.get(r) || ''])); cfgIndex.sig = sig; });
+  const saved = readJson(cfgIndexFile(), null);
+  if (saved?.sig === sig && Array.isArray(saved.owners)) { cfgIndex.owners = new Map(saved.owners); cfgIndex.sig = sig; return cfgIndex; }
+  const file = cfgIndexFile();
+  const p = configOwners(rels).then(own => {
+    cfgIndex.owners = new Map(rels.map(r => [r, own.get(r) || ''])); cfgIndex.sig = sig;
+    try { writeJson(file, { sig, owners: [...cfgIndex.owners] }); } catch { }
+  });
   cfgIndex.building = { sig, p };
   try { await p; } finally { if (cfgIndex.building?.sig === sig) cfgIndex.building = null; }
   return cfgIndex;
@@ -1316,11 +1356,17 @@ async function checkAppUpdate() {
 // =====================================================================================================
 // IPC
 // =====================================================================================================
-ipcMain.handle('init', () => ({
+ipcMain.handle('init', () => { const t = Date.now(); const r = initPayload(); perf(`init built in ${Date.now() - t}ms, ${Math.round(JSON.stringify(r).length / 1024)} KB`); return r; });
+const initPayload = () => ({
   settings: publicSettings(), profile: modsPayload(), status, job, watch, installing, catalogFetched: catalog?.fetched || null,
   log: logTail.slice(-400), updates, modpack: modpackInfo(), list: listState, player: playerInfo(), appUpdate, version: OWN_VERSION, game: gameState,
-}));
-ipcMain.handle('action', (_e, name, arg) => action(name, arg));
+});
+ipcMain.handle('action', async (_e, name, arg) => {
+  if (!PERF) return action(name, arg);
+  const t = Date.now(), r = await action(name, arg);
+  perf(`action ${name} ${Date.now() - t}ms, ${Math.round((JSON.stringify(r) || '').length / 1024)} KB`);
+  return r;
+});
 // (an AppImage's own path is gone once it quits - relaunch the .AppImage file)
 ipcMain.handle('installUpdate', () => { quitting = true; app.relaunch(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE, args: process.argv.slice(1) } : undefined); app.quit(); });
 const SERVER_SETTABLE = { directJoin: 'directJoin', joinAddress: 'joinAddress', serverName: 'name', serverWorld: 'world', addresses: 'addresses', autoSync: 'autoSync', quietSeconds: 'quietSeconds', retryMinutes: 'retryMinutes',
@@ -1509,6 +1555,17 @@ app.on('before-quit', () => { quitting = true; });
 app.on('window-all-closed', () => { if (quitting) app.quit(); });
 
 app.whenReady().then(async () => {
+  perf('ready');
+  // --perf-close=<s>: presses the window close button after <s> seconds (tray unload test)
+  const pc = +((process.argv.find(x => x.startsWith("--perf-close=")) || "").slice(13));
+  if (PERF && pc) setTimeout(() => { if (win && !win.isDestroyed()) win.close(); }, pc * 1000);
+  if (PERF) {
+    let last = process.cpuUsage();
+    setInterval(() => {
+      const m = app.getAppMetrics(), c = process.cpuUsage(last); last = process.cpuUsage();
+      perf(`main cpu ${((c.user + c.system) / 1e4 / 10).toFixed(1)}% · ` + m.map(x => `${x.type} ${x.cpu.percentCPUUsage.toFixed(1)}% ${Math.round(x.memory.workingSetSize / 1024)}MB`).join(' · '));
+    }, 10000);
+  }
   protocol.handle('modicon', req => {
     const name = decodeURIComponent(new URL(req.url).pathname.replace(/^\//, ''));
     if (!name || name.includes('..') || /[\\/]/.test(name)) return new Response('', { status: 404 });
@@ -1517,7 +1574,7 @@ app.whenReady().then(async () => {
   if (!dataArg) ensureShortcuts();
   if (!dataArg) { applyStartup(); registerProtocols(); }
   createTray();
-  createWindow(!process.argv.includes('--hidden'));
+  if (!process.argv.includes('--hidden') || process.argv.some(x => x.startsWith('--shot='))) createWindow(true);
   log(`Bifrost ${OWN_VERSION} pornit (${G.servers.length} servere${srv() ? `, activ: ${srv().name} - ${srv().role === 'admin' ? 'admin' : 'jucător'}` : ''})`);
   loadManifestCache();
   indexCatalog();
@@ -1529,7 +1586,8 @@ app.whenReady().then(async () => {
   // admin: watch the profile, sync, configs; everyone: status + the list
   setTimeout(() => { if (isAdmin() && srv().conn && srv().autoSync) syncNow('pornire'); }, 4000);
   setInterval(tick, 3000);
-  checkGameProcess(); setInterval(checkGameProcess, 4000);
+  const gameCheck = () => setTimeout(async () => { await checkGameProcess(); gameCheck(); }, (win && !win.isDestroyed() && win.isVisible()) || gameState.launching ? 4000 : 20000);
+  checkGameProcess(); gameCheck();
   setInterval(() => twoWay('verificare periodică'), 3 * 60e3);
   pollStatus();
   setInterval(() => { if (win && win.isVisible()) pollStatus(); }, 20000);

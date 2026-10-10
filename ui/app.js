@@ -270,12 +270,6 @@ function renderSettingsGame() {
     if (who) $('#loader-state').textContent = who + (g.backup ? ' Backup-ul anterior există.' : '');
   }
 }
-async function loadCatalogQuiet() {
-  if (S.catalog) return;
-  const r = await window.vp.act('catalog');
-  if (r.packages && !S.catalog) { S.catalog = r.packages.filter(p => !/^ebkr-r2modman/.test(p.full)).map(p => ({ ...p, hay: `${p.full} ${p.name.replace(/_/g, ' ')} ${p.owner} ${p.desc}`.toLowerCase() })); S.catalogFetched = r.fetched; buildCats(); }
-  renderPlayer(); renderPlayerMods();
-}
 function renderSettings() {
   const s = S.settings;
   $$('[data-set]').forEach(el => {
@@ -834,7 +828,7 @@ function renderPlayer() {
   // recommended
   const rec = m?.recommended || [], nx = (m?.nexus || []).filter(n => !n.required);
   $('#pl-rec-card').hidden = !rec.length && !nx.length;
-  const iconOf = full => S.catalog?.find(p => p.full === full)?.icon;
+  const iconOf = full => P.icons?.[full] || S.catalog?.find(p => p.full === full)?.icon;
   $('#pl-rec').innerHTML = [...rec.map(r => ({ key: r.full, title: r.title || r.full, sub: r.full.split('-')[0] + ' · ' + r.ver, on: !!P.recommended[r.full], icon: iconOf(r.full) })),
   ...nx.map(n => ({ key: n.key, title: n.title, sub: `Nexus · ${n.version || ''}`, on: !!P.nexusChosen[n.key], nexus: true }))].map(r => `
     <div class="rec">${r.icon ? `<img src="${esc(r.icon)}" alt="" loading="lazy">` : '<div class="ph"></div>'}<div><b>${esc(r.title)}</b><small>${esc(r.sub)}</small></div>
@@ -1139,7 +1133,6 @@ window.vp.on((ch, d) => {
   renderSettings();
   renderHowto();
   go(!d.settings.server ? 'welcome' : d.settings.isAdmin ? 'server' : 'home');
-  loadCatalogQuiet();
   renderStatus(); renderWatch(); renderMods(); renderModpack(); renderMiniLog(); renderPlayer(); renderPlayerMods(); renderList(); renderAppUpdate(); renderSettingsGame();
   setInterval(() => { renderWatch(); renderStatus(); }, 30000);
 })();
