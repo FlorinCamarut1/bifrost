@@ -1,7 +1,7 @@
 {
   "name": "bifrost",
   "productName": "Bifrost",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Valheim mod manager and server companion",
   "main": "main.js",
   "private": true,
@@ -34,7 +34,8 @@
       "catalog-worker.js",
       "lib/**",
       "ui/**",
-      "package.json"
+      "package.json",
+      "!build/**"
     ],
     "asarUnpack": [
       "node_modules/7zip-bin/win/**",
@@ -50,15 +51,17 @@
           ]
         }
       ],
-      "icon": "ui/app.ico"
+      "icon": "ui/app.ico",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": false,
       "shortcutName": "Bifrost",
-      "artifactName": "Bifrost-Setup-${version}.${ext}"
+      "artifactName": "Bifrost-Setup-${version}.${ext}",
+      "include": "build/installer.nsh"
     },
     "publish": [
       {
@@ -66,6 +69,12 @@
         "owner": "FlorinCamarut1",
         "repo": "bifrost",
         "releaseType": "release"
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "ui/app.ico",
+        "to": "app.ico"
       }
     ]
   }
