@@ -185,11 +185,12 @@ function renderMods() {
           <span class="mod-author">de ${esc(m.author)}</span><span class="mod-ver">${esc(m.version)}</span>${badges}</div>
         <div class="mod-desc" title="${esc(m.description)}">${esc(m.description)}</div>
       </div>
-      <div class="mod-actions">${seg}${uninstall}</div>
+      <div class="mod-actions">${m.configs ? `<button class="icon-btn" data-config="${esc(m.name)}" data-title="${esc(m.displayName)}" title="Configurare (${m.configs} ${m.configs === 1 ? 'fișier' : 'fișiere'})">${GEAR}</button>` : ''}${seg}${uninstall}</div>
     </div>`;
-  }).join('');
+  }).join('') + (S.profile.otherConfigs ? `<div class="mod-other"><button class="btn ghost small" data-config="" data-title="Alte configurări">${GEAR} Alte configurări (${S.profile.otherConfigs} fără un mod recunoscut)</button></div>` : '');
 }
 $('#mod-list').addEventListener('click', async e => {
+  const cf = e.target.closest('[data-config]'); if (cf) { openConfigDrawer(cf.dataset.config, cf.dataset.title); return; }
   const up = e.target.closest('[data-update]'); if (up) { installPkg(up.dataset.update, up.dataset.ver); return; }
   const un = e.target.closest('[data-uninstall]');
   if (un) {
@@ -552,7 +553,10 @@ $('#br-grid').addEventListener('click', e => {
 });
 
 // detail drawer
-function closeDrawer() { S.drawer = null; $('#drawer').hidden = true; $('#drawer-bg').hidden = true; }
+async function closeDrawer() {
+  if (String(S.drawer).startsWith('cfg:') && cfgDirty() && !await confirmBox('Renunți la modificări?', 'Ai modificări nesalvate în configurare.', 'Renunță la ele')) return;
+  S.drawer = null; $('#drawer').hidden = true; $('#drawer-bg').hidden = true;
+}
 $('#drawer-x').onclick = closeDrawer; $('#drawer-bg').onclick = closeDrawer;
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.drawer) closeDrawer(); });
 function drawerHead(p) {
@@ -587,10 +591,174 @@ async function openDrawer(full) {
   el.innerHTML = DOMPurify.sanitize(marked.parse(r.markdown || ''), { FORBID_TAGS: ['style', 'form', 'input', 'iframe'] });
   el.querySelectorAll('a[href]').forEach(a => { a.dataset.open = a.href; a.removeAttribute('href'); a.style.cursor = 'pointer'; });
 }
-function refreshDrawer() { if (!S.drawer || !S.catalog || String(S.drawer).startsWith('nx:')) return; const p = S.catalog.find(x => x.full === S.drawer); const top = $('#dr-top'); if (p && top) top.innerHTML = drawerHead(p); }
+function refreshDrawer() { if (!S.drawer || !S.catalog || /^(nx|cfg):/.test(String(S.drawer))) return; const p = S.catalog.find(x => x.full === S.drawer); const top = $('#dr-top'); if (p && top) top.innerHTML = drawerHead(p); }
 $('#drawer').addEventListener('click', e => {
   const b = e.target.closest('[data-install]'); if (b) { installPkg(b.dataset.install); return; }
   const o = e.target.closest('[data-open]'); if (o && /^https:\/\//.test(o.dataset.open)) window.vp.act('open', o.dataset.open);
+});
+
+// ---------- config editor (Mods → ⚙): the mod's files in the profile's BepInEx/config, sent to the server ----------
+const GEAR = '<svg class="ico" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>';
+const CFG = { key: null, title: '', files: [], rel: null, file: null, err: null, changes: new Map(), raw: false, rawText: null, q: '', server: false, side: null, after: null, busy: false };
+const cfgDirty = () => CFG.raw ? CFG.rawText !== null && CFG.rawText !== CFG.file?.text : CFG.changes.size > 0;
+const cfgEntry = id => { const [si, ei] = id.split('.').map(Number); const sec = CFG.file.parsed.sections[si]; return { sec, e: sec.entries[ei] }; };
+async function openConfigDrawer(key, title) {
+  S.drawer = `cfg:${key}`;
+  Object.assign(CFG, { key, title, files: [], rel: null, file: null, err: null, changes: new Map(), raw: false, rawText: null, q: '', after: null, busy: false });
+  $('#drawer').hidden = false; $('#drawer-bg').hidden = false; $('#drawer').scrollTop = 0;
+  $('#drawer-body').innerHTML = '<div class="empty">se încarcă...</div>';
+  const r = await window.vp.act('modConfigs', key);
+  if (S.drawer !== `cfg:${key}`) return;
+  if (!r.ok || !r.files.length) { $('#drawer-body').innerHTML = `<div class="empty">${esc(r.error || 'Modul nu are fișiere de configurare (le scrie la prima pornire a jocului).')}</div>`; return; }
+  Object.assign(CFG, { files: r.files, server: r.server, side: r.side });
+  await loadConfigFile((r.files.find(f => f.kind === 'cfg') || r.files[0]).rel, true);
+}
+async function loadConfigFile(rel, force) {
+  if (!force && cfgDirty() && !await confirmBox('Renunți la modificări?', `Ai modificări nesalvate în ${CFG.rel}.`, 'Renunță la ele')) return;
+  const key = S.drawer;
+  const r = await window.vp.act('readConfig', rel);
+  if (S.drawer !== key) return;
+  Object.assign(CFG, { rel, file: r.ok ? r : null, err: r.ok ? null : r.error, changes: new Map(), raw: !(r.ok && r.parsed), rawText: null });
+  renderConfig();
+}
+function cfgRow(si, ei, sec, e) {
+  const id = `${si}.${ei}`, v = CFG.changes.has(id) ? CFG.changes.get(id) : e.value;
+  let ctl;
+  if (e.kind === 'bool') ctl = `<label class="switch"><input type="checkbox" data-cfg="${id}" ${/^true$/i.test(v) ? 'checked' : ''}><span></span></label>`;
+  else if (e.kind === 'enum') ctl = `<select class="select" data-cfg="${id}">${[...new Set([...e.values, v])].map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  else ctl = `<input class="txt" data-cfg="${id}" value="${esc(v)}" ${e.kind === 'text' ? '' : 'inputmode="decimal"'} spellcheck="false">`;
+  const meta = [e.range ? `<span>${esc(e.range[0])} – ${esc(e.range[1])}</span>` : '',
+    e.def !== null && e.def !== v ? `<button class="cfg-def" data-cfg-reset="${id}" title="Pune valoarea implicită">implicit: ${esc(e.def === '' ? '(gol)' : e.def)}</button>` : ''].join('');
+  return `<div class="cfg-row ${CFG.changes.has(id) ? 'changed' : ''}" data-row="${id}" data-hay="${esc(`${e.key} ${e.desc} ${sec.name}`.toLowerCase())}">
+    <div class="cfg-l"><b>${esc(e.key)}</b>${e.desc ? `<small>${esc(e.desc)}</small>` : ''}</div>
+    <div class="cfg-c">${ctl}${meta ? `<div class="cfg-meta">${meta}</div>` : ''}</div></div>`;
+}
+function renderConfig() {
+  const f = CFG.file;
+  const dest = !CFG.server ? 'Se salvează în profilul tău.' : CFG.side === 'client'
+    ? 'Mod de client: se salvează în profil (și ajunge pe server odată cu celelalte configurări).'
+    : 'Se salvează în profil și se trimite imediat pe server.';
+  // a few files: buttons; many (EpicLoot, Seasonality...): a list
+  const files = CFG.files.length <= 1 ? ''
+    : CFG.files.length <= 5 ? `<div class="chips cfg-files no-i18n">${CFG.files.map(x => `<button class="chip ${x.rel === CFG.rel ? 'active' : ''}" data-cfg-file="${esc(x.rel)}">${esc(x.rel)}</button>`).join('')}</div>`
+      : `<div class="cfg-files"><select class="select no-i18n" id="cfg-file">${CFG.files.map(x => `<option value="${esc(x.rel)}" ${x.rel === CFG.rel ? 'selected' : ''}>${esc(x.rel)}</option>`).join('')}</select><span class="muted small">${CFG.files.length} fișiere</span></div>`;
+  let body;
+  if (CFG.err) body = `<div class="empty">${esc(CFG.err)}</div>`;
+  else if (CFG.raw) body = `<textarea class="cfg-raw no-i18n" id="cfg-raw" spellcheck="false">${esc(CFG.rawText ?? f.text)}</textarea>`;
+  else {
+    const secs = f.parsed.sections, open = secs.length <= 4 || !!CFG.q;
+    body = secs.map((sec, si) => `<details class="cfg-sec" data-sec="${si}" ${open ? 'open' : ''}><summary class="no-i18n">${esc(sec.name)} <span class="muted">${sec.entries.length}</span></summary>
+      <div class="no-i18n">${sec.entries.map((e, ei) => cfgRow(si, ei, sec, e)).join('')}</div></details>`).join('') || '<div class="empty">Fișierul nu are setări.</div>';
+  }
+  $('#drawer-body').innerHTML = `
+    <div class="cfg-head"><h2>${esc(CFG.title)}</h2><div class="muted">${f?.parsed?.plugin ? `<span class="no-i18n">${esc(f.parsed.plugin)}</span> · ` : ''}<span>${dest}</span></div></div>
+    ${files}
+    <div class="cfg-tools">${f?.parsed && !CFG.raw ? `<input class="txt" id="cfg-q" placeholder="Caută o setare..." value="${esc(CFG.q)}">` : `<span class="muted small no-i18n">${esc(CFG.rel || '')}</span>`}
+      ${f?.parsed ? `<div class="seg" id="cfg-mode"><button class="${CFG.raw ? '' : 'on server'}" data-mode="form">Setări</button><button class="${CFG.raw ? 'on server' : ''}" data-mode="raw">Text</button></div>` : ''}</div>
+    <div id="cfg-body">${body}</div>
+    <div class="cfg-bar" id="cfg-bar"></div>`;
+  filterConfig(); renderConfigBar();
+}
+function filterConfig() {
+  if (CFG.raw || !CFG.file?.parsed) return;
+  const q = CFG.q.trim().toLowerCase();
+  $$('#cfg-body .cfg-sec').forEach(d => {
+    let n = 0;
+    d.querySelectorAll('.cfg-row').forEach(r => { const hit = !q || r.dataset.hay.includes(q); r.hidden = !hit; n += hit; });
+    d.hidden = !n; if (q && n) d.open = true;
+    const c = d.querySelector('summary .muted'); if (c) c.textContent = q ? `${n} / ${d.querySelectorAll('.cfg-row').length}` : d.querySelectorAll('.cfg-row').length;
+  });
+}
+function renderConfigBar() {
+  const bar = $('#cfg-bar'); if (!bar) return;
+  const n = CFG.raw ? (cfgDirty() ? 1 : 0) : CFG.changes.size;
+  if (!n && CFG.after) { bar.innerHTML = CFG.after; bar.classList.add('done'); return; }
+  bar.classList.remove('done');
+  bar.innerHTML = `<span class="${n ? '' : 'muted'}">${n ? (CFG.raw ? 'Text modificat' : `${n} ${n === 1 ? 'modificare nesalvată' : 'modificări nesalvate'}`) : 'Nicio modificare'}</span>
+    <div class="row gap"><button class="btn ghost small" id="cfg-discard" ${n ? '' : 'disabled'}>Renunță</button><button class="btn primary ${CFG.busy ? 'working' : ''}" id="cfg-save" ${n && !CFG.busy ? '' : 'disabled'}>${CFG.busy ? 'Salvez...' : 'Salvează'}</button></div>`;
+}
+function cfgInvalid(e, v) {
+  if (e.kind === 'int' && !/^-?\d+$/.test(v.trim())) return 'număr întreg';
+  if (e.kind === 'float' && !/^-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(v.trim())) return 'număr (cu punct, ex. 1.5)';
+  if (e.range && (e.kind === 'int' || e.kind === 'float') && (Number(v) < e.range[0] || Number(v) > e.range[1])) return `între ${e.range[0]} și ${e.range[1]}`;
+  return null;
+}
+async function saveConfig() {
+  if (CFG.busy) return;
+  const arg = { rel: CFG.rel, expect: CFG.file.hash };
+  if (CFG.raw) arg.text = CFG.rawText;
+  else {
+    const bad = [];
+    arg.changes = [...CFG.changes].map(([id, v]) => {
+      const { sec, e } = cfgEntry(id), why = cfgInvalid(e, v);
+      $(`#cfg-body [data-row="${id}"]`)?.classList.toggle('invalid', !!why);
+      if (why) bad.push(`${e.key}: ${why}`);
+      return { section: sec.name, key: e.key, value: e.kind === 'int' || e.kind === 'float' ? v.trim() : v };
+    });
+    if (bad.length) { toast(`Valori greșite - ${bad.join('; ')}`, 'error'); return; }
+  }
+  CFG.busy = true; renderConfigBar();
+  const r = await window.vp.act('saveConfig', arg);
+  CFG.busy = false;
+  if (!r.ok) { toast(r.error, 'error'); if (/s-a schimbat/.test(r.error)) await loadConfigFile(CFG.rel, true); else renderConfigBar(); return; }
+  CFG.after = r.pushed
+    ? `<span>Salvat și trimis pe server. Modurile cu sincronizare de configurări îl aplică imediat; restul, la restart.</span>${r.canRestart ? '<button class="btn small" id="cfg-restart">Repornește serverul când e gol</button>' : ''}`
+    : r.later ? '<span>Salvat. Ajunge pe server imediat ce termin ce lucrez acum.</span>'
+      : r.error ? `<span>Salvat în profil, dar nu l-am putut trimite pe server: ${esc(r.error)}</span>`
+        : r.unchanged ? '<span class="muted">Nimic de salvat.</span>' : '<span>Salvat în profil.</span>';
+  const keepQ = CFG.q, open = $$('#cfg-body .cfg-sec').filter(d => d.open).map(d => d.dataset.sec);
+  await loadConfigFile(CFG.rel, true);
+  CFG.q = keepQ; const qi = $('#cfg-q'); if (qi) qi.value = keepQ;
+  $$('#cfg-body .cfg-sec').forEach(d => { if (open.includes(d.dataset.sec)) d.open = true; });
+  filterConfig();
+}
+function cfgSet(id, v) {
+  const { e } = cfgEntry(id);
+  if (v === e.value) CFG.changes.delete(id); else CFG.changes.set(id, v);
+  CFG.after = null;
+  $(`#cfg-body [data-row="${id}"]`)?.classList.toggle('changed', CFG.changes.has(id));
+  renderConfigBar();
+}
+$('#drawer-body').addEventListener('change', e => {
+  if (e.target.id !== 'cfg-file' || !String(S.drawer).startsWith('cfg:')) return;
+  const rel = e.target.value; e.target.value = CFG.rel; CFG.after = null; loadConfigFile(rel);
+});
+$('#drawer-body').addEventListener('input', e => {
+  if (!String(S.drawer).startsWith('cfg:') || e.target.id === 'cfg-file') return;
+  if (e.target.id === 'cfg-q') { CFG.q = e.target.value; filterConfig(); return; }
+  if (e.target.id === 'cfg-raw') { CFG.rawText = e.target.value; CFG.after = null; renderConfigBar(); return; }
+  const id = e.target.dataset?.cfg; if (!id) return;
+  cfgSet(id, e.target.type === 'checkbox' ? String(e.target.checked) : e.target.value);
+});
+$('#drawer-body').addEventListener('click', async e => {
+  if (!String(S.drawer).startsWith('cfg:')) return;
+  const f = e.target.closest('[data-cfg-file]'); if (f) { if (f.dataset.cfgFile !== CFG.rel) { CFG.after = null; loadConfigFile(f.dataset.cfgFile); } return; }
+  const rs = e.target.closest('[data-cfg-reset]');
+  if (rs) {
+    const id = rs.dataset.cfgReset, { sec, e: en } = cfgEntry(id);
+    cfgSet(id, en.def);
+    const [si, ei] = id.split('.').map(Number), row = $(`#cfg-body [data-row="${id}"]`);
+    if (row) { const tmp = document.createElement('div'); tmp.innerHTML = cfgRow(si, ei, sec, en); row.replaceWith(tmp.firstElementChild); }
+    return;
+  }
+  const md = e.target.closest('#cfg-mode button');
+  if (md) {
+    const raw = md.dataset.mode === 'raw'; if (raw === CFG.raw) return;
+    if (cfgDirty() && !await confirmBox('Renunți la modificări?', 'Ca să schimbi modul de editare, salvează sau renunță la modificări.', 'Renunță la ele')) return;
+    Object.assign(CFG, { raw, rawText: null, changes: new Map() }); renderConfig(); return;
+  }
+  if (e.target.closest('#cfg-discard')) { Object.assign(CFG, { rawText: null, changes: new Map() }); renderConfig(); return; }
+  if (e.target.closest('#cfg-save')) { saveConfig(); return; }
+  const rb = e.target.closest('#cfg-restart');
+  if (rb) {
+    rb.disabled = true; rb.classList.add('working'); rb.textContent = 'Repornesc...';
+    const r = await window.vp.act('restartIdle');
+    toast(!r.ok ? r.error : r.postponed ? 'Sunt jucători online - serverul repornește când se golește.' : r.manualRestart ? 'Repornește serverul din panoul hostului.' : r.joinCode ? `Server repornit - join code ${r.joinCode}` : 'Server repornit.', r.ok ? 'ok' : 'error');
+    if (rb.isConnected) { rb.classList.remove('working'); rb.textContent = r.ok && !r.postponed ? 'Repornit' : 'Repornește serverul când e gol'; rb.disabled = r.ok && !r.postponed; }
+  }
+});
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && String(S.drawer).startsWith('cfg:') && cfgDirty()) { e.preventDefault(); saveConfig(); }
 });
 
 // ---------- player: home ----------
@@ -901,7 +1069,7 @@ function applyLang() {
   if (!en) { if (i18nObs) { i18nObs.disconnect(); i18nObs = null; location.reload(); } return; }
   const fix = node => {
     if (node.nodeType === 3) { const v = t(node.nodeValue); if (v !== node.nodeValue) node.nodeValue = v; return; }
-    if (node.nodeType !== 1 || node.tagName === 'SCRIPT' || node.tagName === 'STYLE' || node.id === 'log' || node.id === 'mini-log' || node.classList?.contains('readme')) return;
+    if (node.nodeType !== 1 || node.tagName === 'SCRIPT' || node.tagName === 'STYLE' || node.id === 'log' || node.id === 'mini-log' || node.classList?.contains('readme') || node.classList?.contains('no-i18n')) return;
     for (const at of ['placeholder', 'title']) { const v = node.getAttribute(at); if (v) { const n = t(v); if (n !== v) node.setAttribute(at, n); } }
     for (const c of node.childNodes) fix(c);
   };

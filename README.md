@@ -78,6 +78,9 @@ Then, automatically:
   too (for players it only decides required vs. recommended). A mass removal (an emptied profile) is refused.
 - **configs**: `BepInEx/config` ↔ server, 3-way (whoever changed since the last sync wins; on first contact the server
   wins for server mods, the player for client mods). Runtime data (saves, logs) is skipped.
+- **editing configs**: *Mods → ⚙* opens every setting of a mod (toggles, lists, numbers, with the description and
+  default BepInEx writes; or the raw file). *Save* writes it into the profile and sends it to the server at once;
+  *Restart the server when empty* applies it for mods that only read their config at start.
 - **mods put on the server by hand** are brought into the profile and managed from then on.
 - **the list** (`server.json`) is published to a secret Gist on your GitHub account (log in from Settings → Accounts,
   paste a token with the `gist` scope, or have the GitHub CLI logged in). The public IP is only included if you turn

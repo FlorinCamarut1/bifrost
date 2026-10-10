@@ -31,7 +31,8 @@ const { build: buildServerList } = require('./lib/manifest');
 const listhost = require('./lib/listhost');
 const { makeTransport, walk } = require('./lib/transport');
 const { syncMods } = require('./lib/modsync');
-const { syncConfigs } = require('./lib/serversync');
+const { syncConfigs, SKIP: CFG_SKIP, safeRel } = require('./lib/serversync');
+const bepcfg = require('./lib/bepcfg');
 const a2s = require('./lib/a2s');
 const tsprofile = require('./lib/tsprofile');
 const importers = require('./lib/importers');
@@ -610,7 +611,11 @@ function adminMods() {
   });
   return { mods, restartPending: st.restartPending, profileFound: true, profile: s.name, source: 'bifrost' };
 }
-const modsPayload = () => !srv() ? { mods: [], profileFound: false } : isAdmin() ? adminMods() : playerMods();
+const modsPayload = () => {
+  const p = !srv() ? { mods: [], profileFound: false } : isAdmin() ? adminMods() : playerMods();
+  if (srv() && isAdmin()) { const c = configCounts(); for (const m of p.mods) m.configs = c[m.name] || 0; p.otherConfigs = c[''] || 0; }
+  return p;
+};
 function setSide(name, side) {
   if (job) return { ok: false, error: 'O sincronizare rulează acum - încearcă după ce termină.' };
   const st = readState(); st.mods[name] = side; writeState(st);
@@ -801,9 +806,16 @@ async function pollStatus() {
 let twoWayBusy = false;
 // which mod a config file belongs to: BepInEx names configs after the plugin GUID, and that GUID is a string inside
 // the plugin's DLL; other mods may mention it too, so the package whose name matches best wins
-async function configSides(rels) {
-  const st = readState(), pr = getProfile(), best = new Map();
-  const names = rels.map(r => r.split('/')[0].replace(/\.(cfg|ya?ml|json|txt)$/i, ''));
+// which mod a config file belongs to: the plugin GUID from a .cfg's header (else the file / folder name) is inside one
+// of the mod's DLLs; with several candidates, the package whose name shares most words with it
+async function configOwners(rels) {
+  const pr = getProfile(), best = new Map();
+  const names = rels.map(r => {
+    if (/\.cfg$/i.test(r) && !r.includes('/')) {
+      try { const g = (fs.readFileSync(path.join(configDir(), r), 'utf8').slice(0, 600).match(/^## Plugin GUID: (.+)$/m) || [])[1]; if (g && g.trim().length >= 4) return g.trim(); } catch { }
+    }
+    return r.split('/')[0].replace(/\.(cfg|ya?ml|json|txt)$/i, '');
+  });
   const tokens = names.map(n => n.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 3));
   for (const [k, p] of Object.entries(pr.packages)) {
     for (const f of (p.files || []).filter(x => /\.dll$/i.test(x))) {
@@ -817,7 +829,67 @@ async function configSides(rels) {
       await new Promise(res => setImmediate(res));
     }
   }
-  return new Map([...best].map(([r, b]) => [r, st.mods[b.key] === 'client' ? 'client' : 'server']));
+  // not in any DLL: a file / folder named like exactly one package (shudnal.ConditionalConfigSync/ -> shudnal-ConditionalConfigSync)
+  const norm = x => x.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const pk = Object.keys(pr.packages).map(k => ({ k, n: norm(k.slice(k.indexOf('-') + 1)) })).filter(x => x.n.length >= 6);
+  rels.forEach((r, i) => {
+    if (best.has(r)) return;
+    const hit = pk.filter(x => norm(names[i]).includes(x.n));
+    if (hit.length === 1) best.set(r, { key: hit[0].k, score: 0 });
+  });
+  return new Map([...best].map(([r, b]) => [r, b.key]));
+}
+async function configSides(rels) {
+  const st = readState(), own = await configOwners(rels);
+  return new Map([...own].map(([r, k]) => [r, st.mods[k] === 'client' ? 'client' : 'server']));
+}
+
+// ---------- config editor (Mods → ⚙): the profile's BepInEx/config, sent to the server by the config sync ----------
+const cfgIndex = { sig: null, owners: null, building: null };
+function configRels() {
+  // .cfg files first (the mod's main settings), then the rest by name
+  try { return walk(configDir()).filter(r => safeRel(r) && !CFG_SKIP.some(x => x.test(r))).sort((a, b) => (/\.cfg$/i.test(b) - /\.cfg$/i.test(a)) || a.localeCompare(b)); } catch { return []; }
+}
+function configSig(rels) { const pr = getProfile(); return JSON.stringify([srv()?.id, Object.entries(pr.packages).map(([k, p]) => `${k}@${p.ver}`).sort(), rels]); }
+async function configIndex() {
+  const rels = configRels(), sig = configSig(rels);
+  if (cfgIndex.sig === sig && cfgIndex.owners) return cfgIndex;
+  if (cfgIndex.building?.sig === sig) { await cfgIndex.building.p; return cfgIndex; }
+  const p = configOwners(rels).then(own => { cfgIndex.owners = new Map(rels.map(r => [r, own.get(r) || ''])); cfgIndex.sig = sig; });
+  cfgIndex.building = { sig, p };
+  try { await p; } finally { if (cfgIndex.building?.sig === sig) cfgIndex.building = null; }
+  return cfgIndex;
+}
+// { modKey: number of files, '': files nobody claims } - from the last index; a stale one is rebuilt in the background
+function configCounts() {
+  const rels = configRels();
+  if (cfgIndex.sig !== configSig(rels) && !cfgIndex.building) configIndex().then(() => send('mods', modsPayload())).catch(e => log(`config index: ${e.message}`, 'error'));
+  const out = {};
+  for (const [, k] of cfgIndex.owners || []) out[k] = (out[k] || 0) + 1;
+  return out;
+}
+const cfgPath = rel => {
+  if (typeof rel !== 'string' || !safeRel(rel) || CFG_SKIP.some(x => x.test(rel))) throw new Error('Fișier de config invalid.');
+  return path.join(configDir(), ...rel.split('/'));
+};
+const sha1 = t => crypto.createHash('sha1').update(t).digest('hex');
+async function saveConfig({ rel, changes, text, expect }) {
+  const p = cfgPath(rel);
+  const cur = fs.readFileSync(p, 'utf8');
+  if (expect && sha1(cur) !== expect) throw new Error('Fișierul s-a schimbat între timp (l-a adus sincronizarea de pe server) - l-am reîncărcat, fă modificarea din nou.');
+  const next = typeof text === 'string' ? text : bepcfg.apply(cur, changes || []);
+  if (next === cur) return { ok: true, unchanged: true };
+  fs.writeFileSync(p + '.tmp', next); fs.renameSync(p + '.tmp', p);
+  log(`Config editat: ${rel}${changes ? ` (${changes.map(c => `${c.key} = ${c.value}`).join(', ').slice(0, 300)})` : ''}`, 'done');
+  const s = srv();
+  if (!isAdmin() || !s.conn || !s.syncConfigs) return { ok: true, pushed: false, local: true, hash: sha1(next) };
+  // straight to the server (the config sync sees the local change); a job in progress -> it goes right after
+  for (let i = 0; i < 30 && (twoWayBusy || job); i++) await new Promise(r => setTimeout(r, 500));
+  if (twoWayBusy || job) return { ok: true, pushed: false, later: true, hash: sha1(next) };
+  await twoWay('config editat');
+  const tw = watch.twoWay || {};
+  if (tw.error) return { ok: true, pushed: false, error: tw.error, hash: sha1(next) };
+  return { ok: true, pushed: true, canRestart: !!transport()?.canRestart, hash: sha1(next) };
 }
 async function twoWay(reason) {
   const s = srv();
@@ -1256,6 +1328,22 @@ async function action(name, arg) {
         return { ok: true, toCopy: r.copy.join(', ') || '-', toRemove: r.remove.join(', ') || '-' };
       } catch (e) { return { ok: false, error: e.message }; }
     }
+    case 'modConfigs': {
+      const ix = await configIndex();
+      const files = [...ix.owners].filter(([, k]) => k === (arg || '')).map(([rel]) => {
+        let size = 0; try { size = fs.statSync(cfgPath(rel)).size; } catch { }
+        return { rel, size, kind: /\.cfg$/i.test(rel) ? 'cfg' : 'text' };
+      });
+      return { ok: true, files, server: isAdmin() && !!srv().conn && !!srv().syncConfigs, side: readState().mods[arg] || null };
+    }
+    case 'readConfig': try {
+      const p = cfgPath(arg);
+      if (fs.statSync(p).size > 4 * 1024 * 1024) return { ok: false, error: 'Fișierul e prea mare pentru editor (peste 4 MB).' };
+      const text = fs.readFileSync(p, 'utf8');
+      return { ok: true, text, hash: sha1(text), parsed: /\.cfg$/i.test(arg) ? bepcfg.parse(text) : null };
+    } catch (e) { return { ok: false, error: e.message }; }
+    case 'saveConfig': try { return await saveConfig(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
+    case 'restartIdle': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, what: 'configurări noi' }); } catch (e) { return { ok: false, error: e.message }; }
     case 'restart': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, force: true }); } catch (e) { return { ok: false, error: e.message }; }
     case 'fixcode': try { await transport().restartGame(); setTimeout(pollStatus, 20000); setTimeout(pollStatus, 60000); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
     case 'startServer': try { await transport().ssh(`cd ~ && docker start ${s.conn.container}`); setTimeout(pollStatus, 5000); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
