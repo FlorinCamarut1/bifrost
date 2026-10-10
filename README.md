@@ -20,8 +20,26 @@ English by default, Romanian available (Settings → Language).
 
 Download from [Releases](../../releases/latest):
 
+**Windows**
+
 - `Bifrost-Setup-x.y.z.exe` - installer, or
 - `Bifrost-x.y.z-win.zip` - portable: unzip anywhere and run `Bifrost.exe`.
+
+**Linux** (x64)
+
+- `Bifrost-x.y.z-linux-amd64.deb` - Debian / Ubuntu / Mint: `sudo apt install ./Bifrost-x.y.z-linux-amd64.deb`, or
+- `Bifrost-x.y.z-linux-x86_64.AppImage` - any distro: `chmod +x Bifrost-*.AppImage` and run it (needs FUSE 2,
+  e.g. `libfuse2` / `libfuse2t64` on Ubuntu).
+
+Bifrost finds Steam (native, Flatpak or Snap) and both ways of running Valheim on Linux:
+
+- the **native Linux build**: Bifrost starts `valheim.x86_64` itself through the profile's `start_game_bepinex.sh`
+  (Steam must be running); nothing is put into the game folder.
+- the **Windows build under Proton**: like on Windows (doorstop next to `valheim.exe`), plus the `winhttp` DLL override
+  in the game's Proton prefix, so no Steam launch options are needed. Start Valheim once from Steam first, so that the
+  prefix exists.
+
+Settings, profiles and the download cache live in `~/.config/Bifrost`.
 
 Bifrost is not code-signed. SmartScreen may say *Windows protected your PC* → *More info → Run anyway*. On PCs with
 **Smart App Control** turned on, an unknown installer can be blocked; use the portable zip there (`Bifrost.exe` is the
@@ -34,7 +52,7 @@ unmodified Electron binary, which Windows knows). Bifrost updates itself by down
 2. Open it - or in Bifrost: *I got an invite* and paste it.
 3. Press **PLAY**.
 
-Mods go into `%APPDATA%\Bifrost\profiles\<server>`. To load that profile, Bifrost puts the BepInEx doorstop
+Mods go into `%APPDATA%\Bifrost\profiles\<server>` (Linux: `~/.config/Bifrost/profiles/<server>`). To load that profile, Bifrost puts the BepInEx doorstop
 (`winhttp.dll`, `doorstop_config.ini`, `doorstop_libs`) next to `valheim.exe`; what was there before (e.g. another mod
 manager's loader) is copied to `bifrost-backup` and can be restored in Settings.
 
@@ -77,10 +95,11 @@ Bifrost installs it (it registers the `nxm://` link); Premium downloads directly
 ```
 npm install
 npm start           # run from source
-npx electron-builder --win nsis zip --publish never
+npx electron-builder --win nsis zip --publish never      # Windows
+npx electron-builder --linux AppImage deb --publish never  # Linux
 ```
 
-Releases are built by GitHub Actions when a `v*` tag is pushed (`.github/workflows/release.yml`).
+Releases (Windows + Linux) are built by GitHub Actions when a `v*` tag is pushed (`.github/workflows/release.yml`).
 
 Test hooks: `--data=<dir>` (separate settings/profiles), `--hidden`, `--run=<action>[:<json>|:@file]`,
 `--shot=<dir> --pages=a,b` (screenshots, rendered off-screen).

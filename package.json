@@ -1,14 +1,15 @@
 {
   "name": "bifrost",
   "productName": "Bifrost",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "description": "Valheim mod manager and server companion",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win --publish never",
-    "release": "electron-builder --win --publish always"
+    "release": "electron-builder --win --publish always",
+    "dist:linux": "electron-builder --linux --publish never"
   },
   "dependencies": {
     "7zip-bin": "^5.2.0",
@@ -40,6 +41,7 @@
     ],
     "asarUnpack": [
       "node_modules/7zip-bin/win/**",
+      "node_modules/7zip-bin/linux/x64/**",
       "node_modules/node-unrar-js/dist/js/unrar.wasm",
       "catalog-worker.js"
     ],
@@ -59,7 +61,13 @@
         }
       ],
       "icon": "ui/app.ico",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "extraResources": [
+        {
+          "from": "ui/app.ico",
+          "to": "app.ico"
+        }
+      ]
     },
     "nsis": {
       "oneClick": true,
@@ -78,12 +86,6 @@
         "releaseType": "release"
       }
     ],
-    "extraResources": [
-      {
-        "from": "ui/app.ico",
-        "to": "app.ico"
-      }
-    ],
     "protocols": [
       {
         "name": "Bifrost invite",
@@ -91,6 +93,51 @@
           "bifrost"
         ]
       }
-    ]
-  }
+    ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "ui/app.png",
+      "category": "Game",
+      "executableName": "bifrost",
+      "maintainer": "FlorinCamarut1 <95957482+FlorinCamarut1@users.noreply.github.com>",
+      "synopsis": "Valheim mod manager and server companion",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "Bifrost",
+          "MimeType": "x-scheme-handler/bifrost;x-scheme-handler/nxm;"
+        }
+      }
+    },
+    "appImage": {
+      "artifactName": "Bifrost-${version}-linux-x86_64.${ext}"
+    },
+    "deb": {
+      "artifactName": "Bifrost-${version}-linux-amd64.${ext}",
+      "depends": [
+        "libnss3",
+        "libgbm1",
+        "libgtk-3-0 | libgtk-3-0t64",
+        "libnotify4",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libsecret-1-0",
+        "file"
+      ]
+    }
+  },
+  "homepage": "https://github.com/FlorinCamarut1/bifrost"
 }

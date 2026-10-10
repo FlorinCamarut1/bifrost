@@ -91,7 +91,7 @@
     'Bifrost pune lângă valheim.exe încărcătorul BepInEx care citește profilul serverului ales. Ce era acolo înainte e păstrat și se poate pune înapoi.': 'Bifrost puts the BepInEx loader next to valheim.exe, pointing at the chosen server\'s profile. What was there before is kept and can be put back.',
     'Modpack Thunderstore (opțional)': 'Thunderstore modpack (optional)', 'Echipa': 'Team', 'Numele pachetului': 'Package name', 'Niciun token salvat.': 'No token saved.',
     'Un pachet pe Thunderstore cu modurile serverului, pentru cine nu folosește Bifrost. Tokenul: thunderstore.io → Settings → Teams → echipa ta → Service Accounts.': 'A Thunderstore package with the server\'s mods, for people without Bifrost. Token: thunderstore.io → Settings → Teams → your team → Service Accounts.',
-    'General': 'General', 'Limba': 'Language', 'Pornește cu Windows': 'Start with Windows', 'Stă în tray, fără fereastră.': 'Stays in the tray, without a window.', 'Notificări': 'Notifications',
+    'General': 'General', 'Limba': 'Language', 'Pornește cu Windows': 'Start with Windows', 'Pornește la login': 'Start at login', 'Linux: Bifrost pornește Valheim direct cu BepInEx-ul din profil, folderul jocului rămâne neatins.': 'Linux: Bifrost starts Valheim directly with the profile’s BepInEx; the game folder stays untouched.', 'Valheim rulează prin Proton, dar n-a pornit încă niciodată: pornește-l o dată din Steam, închide-l, apoi apasă JOACĂ.': 'Valheim runs through Proton but has never been started: start it once from Steam, close it, then press PLAY.', 'Stă în tray, fără fereastră.': 'Stays in the tray, without a window.', 'Notificări': 'Notifications',
     'Update-uri, join code nou, erori.': 'Updates, new join code, errors.', 'Folderul aplicației': 'App folder', 'Profilul de moduri': 'Mod profile', 'Caută update': 'Check for update', 'Închide complet': 'Quit',
     // ---- wizard ----
     'Profil personal ': 'Personal profile', 'Importă moduri în profil': 'Import mods into the profile', 'Conexiunea la server': 'Server connection',
@@ -140,7 +140,7 @@
     'Nu găsesc Valheim (Steam). Alege folderul jocului în Setări.': 'Valheim not found (Steam). Choose the game folder in Settings.',
   };
   const PATTERNS = [
-    [/^de (.+)$/, 'by $1'], [/^v(\S+) · Nexus (\d+)$/, 'v$1 · Nexus $2'],
+    [/^de (.+)$/, 'by $1'], [/^Acum: (.+)$/, 'Now: $1'], [/^Nu găsesc (\S+) - e instalat Steam\?$/, "Can't find $1 - is Steam installed?"], [/^v(\S+) · Nexus (\d+)$/, 'v$1 · Nexus $2'],
     [/^Profilul Bifrost · (\d+) pachete$/, 'Bifrost profile · $1 packages'],
     [/^Profilul (.+) · (\d+) moduri · (\d+) pe server$/, '$1 profile · $2 mods · $3 on server'],
     [/^Profilul Bifrost · (\d+) moduri · (\d+) pe server$/, 'Bifrost profile · $1 mods · $2 on server'],

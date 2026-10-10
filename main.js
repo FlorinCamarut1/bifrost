@@ -19,6 +19,9 @@ if (app.isPackaged && !global.__bifrostInner) {
 }
 
 const { BrowserWindow, Tray, Menu, ipcMain, Notification, shell, nativeImage, safeStorage, clipboard, protocol, net, dialog } = require('electron');
+const LINUX = process.platform === 'linux';
+// AppImage: Chromium's setuid sandbox helper cannot work from the read-only mount (and Ubuntu 24.04 blocks the other one)
+if (LINUX && process.env.APPIMAGE) app.commandLine.appendSwitch('no-sandbox');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
@@ -228,7 +231,24 @@ const startMenu = () => path.join(app.getPath('appData'), 'Microsoft', 'Windows'
 const ownShortcut = extraArgs => app.isPackaged
   ? { target: process.execPath, args: extraArgs || '', cwd: path.dirname(process.execPath), icon: path.join(process.resourcesPath, 'app.ico'), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Valheim' }
   : devShortcut(extraArgs);
+// Linux: one bifrost.desktop (same name as the .deb's, so it shadows it instead of showing twice) for the menu and the
+// bifrost:// + nxm:// links, and a copy in ~/.config/autostart for "start at login"
+const xdgDir = (env, ...def) => process.env[env] || path.join(require('os').homedir(), ...def);
+function desktopEntry(extra) {
+  const q = s => `"${String(s).replace(/(["\\`$])/g, '\\$1')}"`;
+  const exec = app.isPackaged ? q(process.env.APPIMAGE || process.execPath) : `${q(process.execPath)} ${q(__dirname)}`;
+  const icon = path.join(DATA, 'bifrost.png');
+  try { fs.copyFileSync(ICON, icon); } catch { }
+  return ['[Desktop Entry]', 'Type=Application', 'Name=Bifrost', 'Comment=Valheim mod manager', `Exec=${exec}${extra}`, `Icon=${icon}`,
+    'Terminal=false', 'Categories=Game;', 'StartupWMClass=Bifrost', 'MimeType=x-scheme-handler/bifrost;x-scheme-handler/nxm;', ''].join('\n');
+}
+function applyStartupLinux() {
+  const f = path.join(xdgDir('XDG_CONFIG_HOME', '.config'), 'autostart', 'bifrost.desktop');
+  if (G.startWithWindows) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, desktopEntry(' --hidden')); }
+  else if (fs.existsSync(f)) fs.unlinkSync(f);
+}
 function applyStartup() {
+  if (LINUX) { try { applyStartupLinux(); } catch (e) { log(`autostart: ${e.message}`); } return; }
   try {
     const lnk = path.join(startMenu(), 'Startup', 'Bifrost.lnk');
     if (app.isPackaged) {
@@ -242,6 +262,11 @@ function applyStartup() {
 }
 // Desktop + Start menu point at the Bifrost that runs now (the Start menu one carries the AppUserModelID notifications need)
 function ensureShortcuts() {
+  if (LINUX) {
+    const f = path.join(xdgDir('XDG_DATA_HOME', '.local', 'share'), 'applications', 'bifrost.desktop'), body = desktopEntry(' %U');
+    try { if ((fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '') !== body) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body); } } catch (e) { log(`bifrost.desktop: ${e.message}`); }
+    return;
+  }
   const target = app.isPackaged ? process.execPath : `${process.execPath}|${__dirname}`;
   if (G.shortcutTarget === target) return;
   for (const l of [path.join(startMenu(), 'Bifrost.lnk'), path.join(app.getPath('desktop'), 'Bifrost.lnk')]) {
@@ -250,6 +275,10 @@ function ensureShortcuts() {
   G.shortcutTarget = target; G.shortcutsV2 = true; saveSettings();
 }
 function registerProtocols() {
+  if (LINUX) {
+    for (const p of ['bifrost', ...(G.nexusKeyEnc ? ['nxm'] : [])]) execFile('xdg-mime', ['default', 'bifrost.desktop', `x-scheme-handler/${p}`], e => { if (e) log(`${p}://: ${e.message}`); });
+    return;
+  }
   for (const p of ['bifrost', ...(G.nexusKeyEnc ? ['nxm'] : [])]) {
     try { if (app.isPackaged) app.setAsDefaultProtocolClient(p); else app.setAsDefaultProtocolClient(p, process.execPath, [path.resolve(__dirname)]); }
     catch (e) { log(`${p}://: ${e.message}`); }
@@ -492,8 +521,11 @@ function playerInfo() {
 const gameState = { running: false, launching: false };
 function sendGame() { send('game', gameState); updateTray(); }
 function checkGameProcess() {
-  return new Promise(resolve => execFile('tasklist', ['/FI', 'IMAGENAME eq valheim.exe', '/NH', '/FO', 'CSV'], { windowsHide: true }, (e, out) => {
-    const running = !e && /"valheim\.exe"/i.test(out || '');
+  const [cmd, args, re] = LINUX
+    ? ['ps', ['-eo', 'args'], /(^|[\\/\s])valheim\.(x86_64|exe)(\s|$)/im]       // native build or Proton (not valheim_server)
+    : ['tasklist', ['/FI', 'IMAGENAME eq valheim.exe', '/NH', '/FO', 'CSV'], /"valheim\.exe"/i];
+  return new Promise(resolve => execFile(cmd, args, { windowsHide: true }, (e, out) => {
+    const running = !e && re.test(out || '');
     if (running !== gameState.running) { gameState.running = running; if (running) gameState.launching = false; sendGame(); }
     resolve(running);
   }));
@@ -502,12 +534,12 @@ async function launchGame() {
   if (gameState.launching) throw new Error('Valheim pornește deja - așteaptă câteva secunde.');
   if (await checkGameProcess()) throw new Error('Valheim rulează deja.');
   game = await Profile.findGame();
-  if (G.gameDir && fs.existsSync(path.join(G.gameDir, 'valheim.exe'))) game.game = G.gameDir;
+  if (Profile.isGameDir(G.gameDir)) game.game = G.gameDir;
   if (!game.game) throw new Error('Nu găsesc Valheim (Steam). Alege folderul jocului în Setări.');
   gameState.launching = true; sendGame();
   try {
     getProfile().prepareGame(game.game);
-    getProfile().launch(game.steam);
+    await getProfile().launch(game);
   } catch (e) { gameState.launching = false; sendGame(); throw e; }
   log(`Pornesc Valheim cu profilul „${srv().name}” (${game.game})`, 'done');
   // "launching" until the game process shows up (Steam can take a while), at most 2 minutes
@@ -1181,7 +1213,8 @@ ipcMain.handle('init', () => ({
   log: logTail.slice(-400), updates, modpack: modpackInfo(), list: listState, player: playerInfo(), appUpdate, version: OWN_VERSION, game: gameState,
 }));
 ipcMain.handle('action', (_e, name, arg) => action(name, arg));
-ipcMain.handle('installUpdate', () => { quitting = true; app.relaunch(); app.quit(); });
+// (an AppImage's own path is gone once it quits - relaunch the .AppImage file)
+ipcMain.handle('installUpdate', () => { quitting = true; app.relaunch(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE, args: process.argv.slice(1) } : undefined); app.quit(); });
 const SERVER_SETTABLE = { serverName: 'name', serverWorld: 'world', addresses: 'addresses', autoSync: 'autoSync', quietSeconds: 'quietSeconds', retryMinutes: 'retryMinutes',
   syncConfigs: 'syncConfigs', syncAllMods: 'syncAllMods', pullServerMods: 'pullServerMods', autoPublish: 'autoPublish', publishAddress: 'publishAddress', builtin: 'builtin', modpackTeam: 'modpackTeam', modpackName: 'modpackName' };
 const GLOBAL_SETTABLE = ['startWithWindows', 'notifications', 'gameDir', 'lang'];

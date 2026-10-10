@@ -265,7 +265,7 @@ function renderSettingsGame() {
   if (g) $('#game-detected').textContent = g.game ? `Acum: ${g.game}` : 'Nu l-am găsit prin Steam - scrie aici folderul care conține valheim.exe.';
   if (g) {
     $('#btn-restore-loader').disabled = !g.backup;
-    const who = { bifrost: 'Acum încarcă modurile Bifrost.', tmm: 'Acum încarcă modurile Thunderstore Mod Manager / r2modman - la JOACĂ preia Bifrost (păstrez un backup).', other: 'Acum e alt încărcător BepInEx - la JOACĂ preia Bifrost (păstrez un backup).', none: 'Valheim e fără moduri acum.' }[g.owner];
+    const who = { bifrost: 'Acum încarcă modurile Bifrost.', tmm: 'Acum încarcă modurile Thunderstore Mod Manager / r2modman - la JOACĂ preia Bifrost (păstrez un backup).', other: 'Acum e alt încărcător BepInEx - la JOACĂ preia Bifrost (păstrez un backup).', none: 'Valheim e fără moduri acum.', native: 'Linux: Bifrost pornește Valheim direct cu BepInEx-ul din profil, folderul jocului rămâne neatins.' }[g.owner];
     if (who) $('#loader-state').textContent = who + (g.backup ? ' Backup-ul anterior există.' : '');
   }
 }
@@ -895,6 +895,7 @@ function renderAppUpdate() {
 // ---------- language: the UI is written in Romanian; English (the default) is applied to whatever reaches the screen ----------
 let i18nObs = null;
 function applyLang() {
+  if (window.vp.platform === 'linux') $('#lbl-autostart').textContent = 'Pornește la login';
   const en = (S.settings.lang || 'en') === 'en', t = window.bifrostI18n.t;
   document.documentElement.lang = en ? 'en' : 'ro';
   if (!en) { if (i18nObs) { i18nObs.disconnect(); i18nObs = null; location.reload(); } return; }

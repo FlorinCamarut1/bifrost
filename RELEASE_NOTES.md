@@ -1,4 +1,6 @@
-﻿## Bifrost 1.1.5
+﻿## Bifrost 1.2.0 - Linux
 
-- PLAY shows a spinner as soon as it is pressed and stays locked until Valheim is up, so a second click does nothing.
-- While Valheim is running the button says *Valheim is running* and cannot start a second copy of the game.
+- **Linux version**: `Bifrost-1.2.0-linux-x86_64.AppImage` (any distro) and `Bifrost-1.2.0-linux-amd64.deb` (Debian / Ubuntu).
+  - Finds Steam (native, Flatpak, Snap) and Valheim: the native Linux build is started with the profile BepInEx (`start_game_bepinex.sh`); the Windows build under Proton gets the doorstop plus the `winhttp` override in its Proton prefix - no Steam launch options needed.
+  - Start at login, menu entry and `bifrost://` / `nxm://` links through `.desktop` files; updates itself from `bifrost-app-*-linux.tar.gz` like the Windows version.
+- Windows: unchanged.

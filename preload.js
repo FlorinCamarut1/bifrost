@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('vp', {
+  platform: process.platform,
   init: () => ipcRenderer.invoke('init'),
   act: (name, arg) => ipcRenderer.invoke('action', name, arg),
   installUpdate: () => ipcRenderer.invoke('installUpdate'),

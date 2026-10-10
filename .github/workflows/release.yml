@@ -1,7 +1,10 @@
-# Builds Bifrost on a clean Windows runner when a v* tag is pushed and publishes the release:
-#   Bifrost-Setup-<v>.exe   installer (first install)
-#   Bifrost-<v>-win.zip     portable (unzip + run Bifrost.exe; works where Smart App Control blocks new installers)
-#   bifrost-app-<v>-e<N>.zip  code bundle the app updates itself from (no new executable; N = Electron major)
+# Builds Bifrost on clean runners when a v* tag is pushed and publishes the release:
+#   Bifrost-Setup-<v>.exe                 Windows installer (first install)
+#   Bifrost-<v>-win.zip                   Windows portable (unzip + run Bifrost.exe; works where Smart App Control blocks new installers)
+#   Bifrost-<v>-linux-x86_64.AppImage     Linux, any distro (chmod +x and run)
+#   Bifrost-<v>-linux-amd64.deb           Debian / Ubuntu
+#   bifrost-app-<v>-e<N>.zip              Windows code bundle the app updates itself from (no new executable; N = Electron major)
+#   bifrost-app-<v>-e<N>-linux.tar.gz     the same for Linux (its unpacked part carries a Linux 7za)
 name: release
 on:
   push:
@@ -9,7 +12,7 @@ on:
 permissions:
   contents: write
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,12 +28,52 @@ jobs:
           $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $e = ((Get-Content node_modules/electron/package.json -Raw | ConvertFrom-Json).version -split '\.')[0]
           Compress-Archive -Path dist/win-unpacked/resources/app.asar, dist/win-unpacked/resources/app.asar.unpacked -DestinationPath "dist/bifrost-app-$v-e$e.zip"
-      - name: Release
+      - name: Collect
         shell: pwsh
+        run: |
+          New-Item -ItemType Directory out | Out-Null
+          Get-ChildItem dist -File | Where-Object { $_.Name -match '\.(exe|zip|blockmap|yml)$' -and $_.Name -notmatch 'uninstaller|builder-' } | Copy-Item -Destination out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/*
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder --linux AppImage deb --publish never
+      - name: Code bundle
+        run: |
+          v=$(node -p "require('./package.json').version")
+          e=$(node -p "require('./node_modules/electron/package.json').version.split('.')[0]")
+          test -x dist/linux-unpacked/resources/app.asar.unpacked/node_modules/7zip-bin/linux/x64/7za
+          tar -czf "dist/bifrost-app-$v-e$e-linux.tar.gz" -C dist/linux-unpacked/resources app.asar app.asar.unpacked
+          mkdir out
+          cp dist/*.AppImage dist/*.deb dist/bifrost-app-*-linux.tar.gz out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: out/*
+
+  release:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $files = @(Get-ChildItem dist -File | Where-Object { $_.Name -match '\.(exe|zip|blockmap|yml)$' -and $_.Name -notmatch 'uninstaller|builder-' } | ForEach-Object { $_.FullName })
-          $notes = if (Test-Path RELEASE_NOTES.md) { 'RELEASE_NOTES.md' } else { $null }
-          if ($notes) { gh release create $env:GITHUB_REF_NAME $files --title "Bifrost $($env:GITHUB_REF_NAME.TrimStart('v'))" --notes-file $notes }
-          else { gh release create $env:GITHUB_REF_NAME $files --title "Bifrost $($env:GITHUB_REF_NAME.TrimStart('v'))" --generate-notes }
+          v="${GITHUB_REF_NAME#v}"
+          if [ -f RELEASE_NOTES.md ]; then notes=(--notes-file RELEASE_NOTES.md); else notes=(--generate-notes); fi
+          gh release create "$GITHUB_REF_NAME" assets/* --title "Bifrost $v" "${notes[@]}"
