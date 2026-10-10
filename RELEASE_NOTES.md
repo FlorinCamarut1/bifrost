@@ -1,4 +1,3 @@
-﻿## Bifrost 1.1.1
+﻿## Bifrost 1.1.2
 
-- **Update card** in Settings: your version, the latest one, *Check now* and *Restart and update*.
-- The portable build makes its own Desktop and Start menu shortcuts and starts with Windows if you want.
+- Importing "what the server already runs" no longer marks every mod as a server mod: client mods on the server stay client (from Thunderstore's categories, or guessed from the mod at the first sync).

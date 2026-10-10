@@ -1026,7 +1026,10 @@ async function importInto(source) {
         const full = man?.name && base.endsWith(man.name) ? base : catalogIndex.has(base) ? base : null;
         if (full && (man?.version_number || catalogIndex.get(full))) mods.push({ full, ver: man?.version_number || catalogIndex.get(full).ver, title: full, serverFolder: n });
         else manual.push({ name: n, server: true });
-        st.mods[full || n] = 'server';
+        // being on the server does not make it a server mod (with "all mods on the server" client mods are there too):
+        // Thunderstore's categories when they say it, otherwise the README/DLL guess at the first sync
+        const side = full ? sideFromCats(catalogIndex.get(full)) : null;
+        if (side) st.mods[full] = side;
       }
       writeState(st);
       if (!mods.some(m => m.full === BEPINEX)) mods.unshift({ full: BEPINEX, ver: catalogIndex.get(BEPINEX)?.ver || '5.4.2351', title: 'BepInExPack Valheim' });
