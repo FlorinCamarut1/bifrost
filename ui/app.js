@@ -119,7 +119,7 @@ function renderWatch() {
   $('#side-sync-text').textContent = j ? 'lucrez...' : !auto ? 'oprit' : (w.text || '');
   $$('[data-act="sync"]').forEach(b => b.disabled = !!j);
   $$('[data-act="restart"],[data-act="dryrun"],[data-act="publishModpack"],[data-act="buildModpack"],[data-act="fixcode"]').forEach(b => b.disabled = !!j);
-  $$('.seg button').forEach(b => { if (!b.dataset.lock) b.disabled = !!j; });
+  $$('.seg[data-name] button').forEach(b => { if (!b.dataset.lock) b.disabled = !!j; });
 
   const pend = $('#mods-pending');
   if (S.profile.restartPending && !j) { pend.hidden = false; pend.innerHTML = '<b>Modurile sunt deja copiate pe server, dar serverul nu a repornit încă.</b> <span class="muted">Repornește singur când nu e nimeni online.</span>'; }
