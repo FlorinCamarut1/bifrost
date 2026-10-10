@@ -364,3 +364,7 @@ body:not(.no-server) [data-need="none"] { display: none !important; }
 .radio small { color: var(--muted); font-size: 12px; }
 #wz-local, #wz-code { width: 100%; margin: 0 0 8px; }
 #wz-type { width: 100%; margin-bottom: 12px; }
+
+/* PLAY while the game runs */
+.btn.play.running { font-size: 16px; letter-spacing: .05em; font-family: var(--sans); filter: none; opacity: 1; background: #5fd09a1a; color: var(--green); border-color: #5fd09a66; box-shadow: none; }
+.btn.play.working:disabled { filter: none; opacity: .9; }

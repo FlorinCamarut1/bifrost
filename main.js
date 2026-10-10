@@ -488,13 +488,31 @@ function playerInfo() {
     nexusUser: G.nexusUser, recommended: s.recommended, nexusChosen: s.nexusChosen,
   };
 }
+// is Valheim running? (one game at a time: a second PLAY must not start another copy)
+const gameState = { running: false, launching: false };
+function sendGame() { send('game', gameState); updateTray(); }
+function checkGameProcess() {
+  return new Promise(resolve => execFile('tasklist', ['/FI', 'IMAGENAME eq valheim.exe', '/NH', '/FO', 'CSV'], { windowsHide: true }, (e, out) => {
+    const running = !e && /"valheim\.exe"/i.test(out || '');
+    if (running !== gameState.running) { gameState.running = running; if (running) gameState.launching = false; sendGame(); }
+    resolve(running);
+  }));
+}
 async function launchGame() {
+  if (gameState.launching) throw new Error('Valheim pornește deja - așteaptă câteva secunde.');
+  if (await checkGameProcess()) throw new Error('Valheim rulează deja.');
   game = await Profile.findGame();
   if (G.gameDir && fs.existsSync(path.join(G.gameDir, 'valheim.exe'))) game.game = G.gameDir;
   if (!game.game) throw new Error('Nu găsesc Valheim (Steam). Alege folderul jocului în Setări.');
-  getProfile().prepareGame(game.game);
-  getProfile().launch(game.steam);
+  gameState.launching = true; sendGame();
+  try {
+    getProfile().prepareGame(game.game);
+    getProfile().launch(game.steam);
+  } catch (e) { gameState.launching = false; sendGame(); throw e; }
   log(`Pornesc Valheim cu profilul „${srv().name}” (${game.game})`, 'done');
+  // "launching" until the game process shows up (Steam can take a while), at most 2 minutes
+  const until = Date.now() + 120e3;
+  (async () => { while (gameState.launching && Date.now() < until) { await new Promise(r => setTimeout(r, 2000)); await checkGameProcess(); } if (gameState.launching) { gameState.launching = false; sendGame(); } })();
 }
 async function playerSync({ launch } = {}) {
   if (!srv()) return { ok: false, error: 'Adaugă sau creează întâi un server.' };
@@ -1160,7 +1178,7 @@ async function checkAppUpdate() {
 // =====================================================================================================
 ipcMain.handle('init', () => ({
   settings: publicSettings(), profile: modsPayload(), status, job, watch, installing, catalogFetched: catalog?.fetched || null,
-  log: logTail.slice(-400), updates, modpack: modpackInfo(), list: listState, player: playerInfo(), appUpdate, version: OWN_VERSION,
+  log: logTail.slice(-400), updates, modpack: modpackInfo(), list: listState, player: playerInfo(), appUpdate, version: OWN_VERSION, game: gameState,
 }));
 ipcMain.handle('action', (_e, name, arg) => action(name, arg));
 ipcMain.handle('installUpdate', () => { quitting = true; app.relaunch(); app.quit(); });
@@ -1348,6 +1366,7 @@ app.whenReady().then(async () => {
   // admin: watch the profile, sync, configs; everyone: status + the list
   setTimeout(() => { if (isAdmin() && srv().conn && srv().autoSync) syncNow('pornire'); }, 4000);
   setInterval(tick, 3000);
+  checkGameProcess(); setInterval(checkGameProcess, 4000);
   setInterval(() => twoWay('verificare periodică'), 3 * 60e3);
   pollStatus();
   setInterval(() => { if (win && win.isVisible()) pollStatus(); }, 20000);

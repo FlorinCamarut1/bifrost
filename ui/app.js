@@ -619,10 +619,13 @@ function renderPlayer() {
   $('#pl-addr').textContent = srv.address || 'cere-l adminului (sau intră cu join code)';
   $('#pl-game').innerHTML = P.game?.game ? esc(P.game.game) : '<span style="color:var(--red)">negăsit</span> · <a href="#" data-page-link="settings">alege folderul</a>';
 
-  const btn = $('#btn-play');
-  btn.disabled = !!S.job || (!m && !own);
-  btn.classList.toggle('working', !!S.job);
-  btn.textContent = S.job ? (S.job.kind === 'play' ? 'Se pregătește...' : 'Lucrez...') : 'JOACĂ';
+  const btn = $('#btn-play'), g = S.game || {};
+  // pressed -> spinner and locked until the game is up; while it runs no second copy can be started
+  const starting = S.playPressed || g.launching || (S.job && S.job.kind === 'play');
+  btn.disabled = !!S.job || starting || g.running || (!m && !own);
+  btn.classList.toggle('working', !!(S.job || starting));
+  btn.classList.toggle('running', !!g.running && !starting);
+  btn.textContent = g.running && !starting ? 'Valheim rulează' : starting ? (S.job?.kind === 'play' ? 'Se pregătește...' : 'Pornește...') : S.job ? 'Lucrez...' : 'JOACĂ';
   $('#pl-play-note').textContent = !m ? '' : need ? `întâi: ${P.plan.install.length} de instalat${P.plan.remove.length ? `, ${P.plan.remove.length} de scos` : ''}${P.plan.bytes ? ` (~${fmtMB(P.plan.bytes)})` : ''}` : 'modurile sunt la zi';
 
   // mods summary
@@ -664,9 +667,13 @@ function renderProgress(p) {
   $('#pg-text').textContent = `${p.text || ''}${p.totalBytes ? ` · ${fmtMB(p.bytes)} / ${fmtMB(p.totalBytes)}` : ''}`;
 }
 $('#btn-play').onclick = async () => {
-  S.lastPlayError = null; renderPlayer();
-  const r = await window.vp.act('play');
-  if (!r.ok) { S.lastPlayError = r.error; renderPlayer(); toast(r.error, 'error'); }
+  if (S.playPressed) return;
+  // lock the button right away, before main answers
+  S.playPressed = true; S.lastPlayError = null; renderPlayer();
+  try {
+    const r = await window.vp.act('play');
+    if (!r.ok) { S.lastPlayError = r.error; toast(r.error, 'error'); }
+  } finally { S.playPressed = false; renderPlayer(); }
 };
 $('#pl-copy-code').onclick = async () => { const c = S.player?.manifest?.server?.joinCode; if (!c) return; await window.vp.act('copy', c); toast(`Join code copiat: ${c}`, 'ok'); };
 $('#pl-rec').addEventListener('change', e => { const i = e.target.closest('[data-rec]'); if (i) window.vp.act('setRecommended', { key: i.dataset.rec, on: i.checked, nexus: !!i.dataset.nx }); });
@@ -914,6 +921,7 @@ window.vp.on((ch, d) => {
   else if (ch === 'mods') { S.profile = d; renderMods(); renderWatch(); renderBrowse(false); refreshDrawer(); renderPlayerMods(); }
   else if (ch === 'player') { S.player = d; renderPlayer(); renderSettingsGame(); }
   else if (ch === 'progress') renderProgress(d);
+  else if (ch === 'game') { S.game = d; renderPlayer(); }
   else if (ch === 'nexusPending') { S.nx.pending = d; window.vp.act('nexusInstalled').then(r => { S.nx.installed = r.installed; if (S.src === 'nx') renderNexus(); if (S.drawer && S.drawer.startsWith('nx:')) openNexusDrawer(S.nxDrawer.modId, true); }); }
   else if (ch === 'list') { S.list = d; renderList(); }
   else if (ch === 'appUpdate') { S.appUpdate = d; renderAppUpdate(); }
@@ -930,7 +938,7 @@ window.vp.on((ch, d) => {
 
 (async () => {
   const d = await window.vp.init();
-  Object.assign(S, { settings: d.settings, profile: d.profile, status: d.status, job: d.job, watch: d.watch, updates: d.updates, modpack: d.modpack, installing: d.installing || {}, catalogFetched: d.catalogFetched, player: d.player, list: d.list || {}, appUpdate: d.appUpdate });
+  Object.assign(S, { settings: d.settings, profile: d.profile, status: d.status, job: d.job, watch: d.watch, updates: d.updates, modpack: d.modpack, game: d.game || {}, installing: d.installing || {}, catalogFetched: d.catalogFetched, player: d.player, list: d.list || {}, appUpdate: d.appUpdate });
   logEntries = d.log; $('#log').innerHTML = d.log.map(logLine).join('\n') + '\n';
   $('#about').textContent = `Bifrost ${d.version}${d.settings.packaged ? '' : ' (din sursă)'} · ${(d.settings.servers || []).length} servere`;
   applyLang();

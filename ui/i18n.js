@@ -126,6 +126,8 @@
     'Nexus nu spune dacă un mod e de server sau de client - citește descrierea de pe Nexus.': 'Nexus does not say whether a mod is server or client - read its description on Nexus.',
     'După instalare îl marchezi la': 'After installing, mark it under', '(Server / Client).': '(Server / Client).', 'Doar arhivele .zip și .7z se pot instala automat.': 'zip, 7z, rar and bare DLLs install automatically.',
     'endorsements': 'endorsements', 'Fișiere': 'Files', 'Niciun fișier activ.': 'No active files.',
+    // ---- play ----
+    'Valheim rulează': 'Valheim is running', 'Pornește...': 'Starting...', 'Valheim rulează deja.': 'Valheim is already running.', 'Valheim pornește deja - așteaptă câteva secunde.': 'Valheim is already starting - wait a few seconds.',
     // ---- update ----
     'Update': 'Update', 'Verifică acum': 'Check now', 'Repornește și actualizează': 'Restart and update', 'Descarcă': 'Download', 'Bifrost': 'Bifrost',
     // ---- main process ----
