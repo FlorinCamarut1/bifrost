@@ -437,6 +437,27 @@ async function pollStatus() {
 
 // ---------- two-way: configs + mods put on the server by hand ----------
 let twoWayBusy = false;
+// which mod a config file belongs to: BepInEx names configs after the plugin GUID (folders too, mostly), and that
+// GUID is a string inside the plugin's DLL -> the mod's server/client choice from mods.json
+async function configSides(rels) {
+  const st = readState(), pr = getProfile(), best = new Map();   // rel -> { key, score }
+  const names = rels.map(r => r.split('/')[0].replace(/\.(cfg|ya?ml|json|txt)$/i, ''));
+  const tokens = names.map(n => n.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 3));
+  for (const [k, p] of Object.entries(pr.packages)) {
+    for (const f of (p.files || []).filter(x => /\.dll$/i.test(x))) {
+      let txt;
+      try { txt = fs.readFileSync(path.join(pr.dir, ...f.split('/'))).toString('latin1'); } catch { continue; }
+      rels.forEach((r, i) => {
+        if (names[i].length < 4 || !txt.includes(names[i])) return;
+        // other mods may mention a GUID (soft dependencies): prefer the package whose name matches it best
+        const score = tokens[i].filter(t => k.toLowerCase().includes(t)).length;
+        if (!best.has(r) || score > best.get(r).score) best.set(r, { key: k, score });
+      });
+      await new Promise(res => setImmediate(res));   // big DLLs: keep the UI responsive
+    }
+  }
+  return new Map([...best].map(([r, b]) => [r, st.mods[b.key] === 'client' ? 'client' : 'server']));
+}
 const serverSync = () => new ServerSync({ server: settings.server, container: settings.container, profileDir: getProfile().dir, stateFile: path.join(DATA, 'config-sync.json'), log });
 async function twoWay(reason) {
   if (!ownSource() || !settings.server || twoWayBusy || job || !(settings.syncConfigs || settings.pullServerMods)) return;
@@ -483,7 +504,7 @@ async function twoWay(reason) {
       }
     }
     if (settings.syncConfigs) {
-      const r = await ss.syncConfigs();
+      const r = await ss.syncConfigs({ sideOf: configSides });
       res.push = r.push.length; res.pull = r.pull.length;
       if (r.push.length) log(`Configurări trimise pe server (${reason}): ${r.push.join(', ')}`, 'done');
       if (r.pull.length) log(`Configurări aduse de pe server (${reason}): ${r.pull.join(', ')}`, 'done');
