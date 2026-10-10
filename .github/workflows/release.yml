@@ -47,11 +47,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # npm drops the executable bit of the bundled 7za
+      - run: chmod +x node_modules/7zip-bin/linux/x64/7za && ls -l node_modules/7zip-bin/linux/x64/
       - run: npx electron-builder --linux AppImage deb --publish never
       - name: Code bundle
         run: |
           v=$(node -p "require('./package.json').version")
           e=$(node -p "require('./node_modules/electron/package.json').version.split('.')[0]")
+          ls -lR dist/linux-unpacked/resources/app.asar.unpacked | head -40
           test -x dist/linux-unpacked/resources/app.asar.unpacked/node_modules/7zip-bin/linux/x64/7za
           tar -czf "dist/bifrost-app-$v-e$e-linux.tar.gz" -C dist/linux-unpacked/resources app.asar app.asar.unpacked
           mkdir out
