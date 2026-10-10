@@ -187,6 +187,15 @@
       "title": "CraftFromContainers"
     }
   ],
-  "nexus": [],
-  "updatedAt": 1791633528110
+  "nexus": [
+    {
+      "key": "nexus-3622",
+      "title": "Free Build Cam - 1.0.17 compatible",
+      "modId": 3622,
+      "fileId": 23850,
+      "version": "1.10",
+      "required": false
+    }
+  ],
+  "updatedAt": 1791634136961
 }
