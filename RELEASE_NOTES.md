@@ -1,5 +1,5 @@
-﻿## Bifrost 1.3.0 - config editor
+﻿## Bifrost 1.4.0 - join directly
 
-- **Mods → ⚙**: every mod that has config files gets a settings panel - toggles, lists and numbers with the description, allowed range and default value from the file, search, reset to default, or the raw text. Mods with many files (EpicLoot, Seasonality) get a file list.
-- **Save** writes the file into the profile and sends it to the server right away (two-way config sync); **Restart the server when empty** applies it for mods that read their config only at start. Only the changed lines are rewritten.
-- Files that belong to no installed mod are under *Other configs* at the end of the list.
+- **PLAY puts you on the server**: Bifrost starts Valheim with the server address and password (`+connect` / `-password`, read from the game code), so after picking the character and pressing *Start* you are in - no join code, no password prompt. Works for crossplay servers too (they are found by their public IP).
+- Settings → this server: **Join the server directly on PLAY**, **Server address** (empty = automatic: from the list, or for admins from the server logs) and **Server password** (typed once, stored encrypted; admins of a Docker server: *Get it from the server*, or it is picked up on the first PLAY).
+- Friends get the address when the admin turns on *Put the IP in the list*; otherwise they type it once, or Bifrost copies the join code to the clipboard.

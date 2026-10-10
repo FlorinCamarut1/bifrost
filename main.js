@@ -79,6 +79,8 @@ const SERVER_DEFAULTS = {
   autoPublish: true, publishAddress: false, modpackTeam: '', modpackName: '', tsTokenEnc: null, nexusLinks: {},
   // player
   recommended: {}, nexusChosen: {},
+  // PLAY joins the server straight away (Valheim's +connect / -password); address empty = from the list / server logs
+  directJoin: true, joinAddress: '', joinPassEnc: null,
 };
 let G = { ...GLOBAL_DEFAULTS, ...readJson(SETTINGS_FILE, {}) };
 const serverDir = id => path.join(DATA, 'servers', id);
@@ -136,7 +138,7 @@ const tr = s => (G.lang || 'en') === 'en' ? i18n.t(s) : s;
 
 function publicServer(s) {
   if (!s) return null;
-  const { connSecretEnc, tsTokenEnc, ...rest } = s;
+  const { connSecretEnc, tsTokenEnc, joinPassEnc, ...rest } = s;
   return { ...rest, hasConnSecret: !!connSecretEnc, hasToken: !!tsTokenEnc, invite: s.list ? listhost.inviteCode(s.list) : null, inviteLink: s.list ? listhost.inviteLink(s.list, JOIN_PAGE) : null };
 }
 const publicSettings = () => {
@@ -149,7 +151,8 @@ const publicSettings = () => {
     // flat aliases the UI reads
     ...(s ? { role: s.role, serverName: s.name, serverWorld: s.world, addresses: s.addresses, autoSync: s.autoSync, quietSeconds: s.quietSeconds,
       retryMinutes: s.retryMinutes, syncConfigs: s.syncConfigs, syncAllMods: s.syncAllMods, pullServerMods: s.pullServerMods,
-      autoPublish: s.autoPublish, publishAddress: s.publishAddress, hasToken: !!s.tsTokenEnc } : {}),
+      autoPublish: s.autoPublish, publishAddress: s.publishAddress, hasToken: !!s.tsTokenEnc,
+      directJoin: s.directJoin !== false, joinAddress: s.joinAddress || '', hasJoinPass: !!s.joinPassEnc, joinTarget: joinTarget() } : {}),
   };
 };
 
@@ -531,6 +534,32 @@ function checkGameProcess() {
     resolve(running);
   }));
 }
+// ---------- joining directly: Valheim's own command line (FejdStartup): +connect <ip:port> queues the server, the
+// character screen's Start joins it (crossplay servers are found by their public IP through PlayFab) and -password
+// answers the server's password prompt. (-joincode would skip the character screen but plays the developer test
+// character, so it is not used.)
+function joinTarget(s = srv()) {
+  if (!s) return null;
+  const withPort = a => { a = String(a || '').trim(); return !a ? null : /:\d+$/.test(a) ? a : `${a}:2456`; };
+  return withPort(s.joinAddress) || withPort(s.role === 'player' ? manifest?.server?.address : status.publicIp);
+}
+// the admin's Docker server knows its own password (SERVER_PASS of the valheim-server image)
+async function detectJoinPassword(s = srv()) {
+  const tr = transport(s);
+  if (!tr?.docker) throw new Error('Doar pentru servere Docker (valheim-server) - scrie parola de mână.');
+  const pw = String(await tr.run('printf "%s" "$SERVER_PASS"', { timeout: 20000 }) || '').trim();
+  s.joinPassEnc = pw ? enc(pw) : null; saveSettings(); send('settings', publicSettings());
+  return pw ? { ok: true, found: true } : { ok: true, found: false };
+}
+async function joinArgs() {
+  const s = srv();
+  if (s.directJoin === false) return { args: [], target: null };
+  const target = joinTarget(s);
+  if (!target) return { args: [], target: null };
+  if (!s.joinPassEnc && isAdmin() && transport()?.docker) { try { await detectJoinPassword(s); } catch (e) { log(`parola serverului: ${e.message}`, 'error'); } }
+  const pw = dec(s.joinPassEnc);
+  return { args: ['+connect', target, ...(pw ? ['-password', pw] : [])], target, password: !!pw };
+}
 async function launchGame() {
   if (gameState.launching) throw new Error('Valheim pornește deja - așteaptă câteva secunde.');
   if (await checkGameProcess()) throw new Error('Valheim rulează deja.');
@@ -540,9 +569,16 @@ async function launchGame() {
   gameState.launching = true; sendGame();
   try {
     getProfile().prepareGame(game.game);
-    await getProfile().launch(game);
+    var join = await joinArgs();
+    await getProfile().launch(game, join.args);
   } catch (e) { gameState.launching = false; sendGame(); throw e; }
-  log(`Pornesc Valheim cu profilul „${srv().name}” (${game.game})`, 'done');
+  log(`Pornesc Valheim cu profilul „${srv().name}” (${game.game})${join.target ? ` - intră direct pe ${join.target}${join.password ? ' cu parola salvată' : ''}` : ''}`, 'done');
+  if (join.target) toast(`Alege caracterul și apasă Start - intri direct pe server${join.password ? '' : ' (fără parolă salvată: o scrii în joc dacă serverul are)'}.`, 'ok');
+  else if (srv().directJoin !== false && (status.joinCode || manifest?.server?.joinCode)) {
+    const code = status.joinCode || manifest.server.joinCode;
+    clipboard.writeText(code);
+    toast(`Nu știu adresa serverului, așa că am copiat join code-ul ${code}: în joc Join game → Add server → Ctrl+V.`, 'info');
+  }
   // "launching" until the game process shows up (Steam can take a while), at most 2 minutes
   const until = Date.now() + 120e3;
   (async () => { while (gameState.launching && Date.now() < until) { await new Promise(r => setTimeout(r, 2000)); await checkGameProcess(); } if (gameState.launching) { gameState.launching = false; sendGame(); } })();
@@ -1287,7 +1323,7 @@ ipcMain.handle('init', () => ({
 ipcMain.handle('action', (_e, name, arg) => action(name, arg));
 // (an AppImage's own path is gone once it quits - relaunch the .AppImage file)
 ipcMain.handle('installUpdate', () => { quitting = true; app.relaunch(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE, args: process.argv.slice(1) } : undefined); app.quit(); });
-const SERVER_SETTABLE = { serverName: 'name', serverWorld: 'world', addresses: 'addresses', autoSync: 'autoSync', quietSeconds: 'quietSeconds', retryMinutes: 'retryMinutes',
+const SERVER_SETTABLE = { directJoin: 'directJoin', joinAddress: 'joinAddress', serverName: 'name', serverWorld: 'world', addresses: 'addresses', autoSync: 'autoSync', quietSeconds: 'quietSeconds', retryMinutes: 'retryMinutes',
   syncConfigs: 'syncConfigs', syncAllMods: 'syncAllMods', pullServerMods: 'pullServerMods', autoPublish: 'autoPublish', publishAddress: 'publishAddress', builtin: 'builtin', modpackTeam: 'modpackTeam', modpackName: 'modpackName' };
 const GLOBAL_SETTABLE = ['startWithWindows', 'notifications', 'gameDir', 'lang'];
 async function action(name, arg) {
@@ -1431,6 +1467,12 @@ async function action(name, arg) {
     case 'quit': quitting = true; app.quit(); return { ok: true };
     // ----- player -----
     case 'play': return playerSync({ launch: true });
+    case 'setJoinPassword': {
+      if (!s) return { ok: false };
+      s.joinPassEnc = arg ? enc(String(arg)) : null; saveSettings(); send('settings', publicSettings());
+      return { ok: true };
+    }
+    case 'detectJoinPassword': try { return await detectJoinPassword(); } catch (e) { return { ok: false, error: e.message }; }
     case 'updateMods': return playerSync({ launch: false });
     case 'refreshList': await refreshManifest(); return { ok: !manifestErr, error: manifestErr };
     case 'setRecommended': {

@@ -284,6 +284,17 @@ function renderSettings() {
   });
   $('#token-state').innerHTML = s.hasToken ? '<span style="color:var(--green)">✓ Token salvat.</span>' : '<span class="muted">Niciun token salvat.</span>';
   $('#nexus-state').innerHTML = s.hasNexusKey && s.nexusUser ? `<span style="color:var(--green)">✓ Conectat ca <b>${esc(s.nexusUser.name)}</b> · ${s.nexusUser.premium ? 'Premium: descărcări automate' : 'cont gratuit: un click pe „Mod Manager Download” per fișier'}</span>` : '<span class="muted">Nicio cheie salvată.</span>';
+  // direct join: what PLAY will connect to
+  if ($('#dj-state')) {
+    $('#dj-state').textContent = !s.directJoin ? 'Oprit: intri din joc, cu join code-ul.'
+      : s.joinTarget ? `Acum: ${s.joinTarget}${s.hasJoinPass ? ' cu parola salvată' : ''}. Alegi caracterul, apeși Start și ești pe server.`
+        : s.isAdmin ? 'Încă nu știu IP-ul public al serverului (apare după ce pornește) - sau scrie adresa mai jos.'
+          : 'Lista serverului nu are IP-ul: scrie adresa mai jos (o ai de la admin) sau adminul bifează „Pune și IP-ul în listă”.';
+    // (attributes set from code are not seen by the translator)
+    $('#dj-addr').placeholder = s.joinAddress ? '' : (s.joinTarget || ((s.lang || 'en') === 'en' ? window.bifrostI18n.t('automat') : 'automat'));
+    $('#jp-state').innerHTML = s.hasJoinPass ? '<span style="color:var(--green)">✓ Parolă salvată (criptat, doar pe PC-ul tău).</span>' : '<span class="muted">Nicio parolă salvată. Dacă serverul are parolă, scrie-o o dată aici.</span>';
+    $('#btn-jp-clear').hidden = !s.hasJoinPass;
+  }
   renderServers();
   document.body.classList.toggle('role-admin', !!s.isAdmin); document.body.classList.toggle('role-player', !s.isAdmin);
   $('#brand-sub').textContent = s.server?.name || 'Valheim';
@@ -294,6 +305,18 @@ $('#btn-nexus').onclick = async () => {
   const r = await window.vp.act('setNexusKey', v); $('#btn-nexus').disabled = false;
   if (r.ok) $('#nexus-input').value = '';
   toast(r.ok ? `Conectat la Nexus ca ${r.user.name}${r.user.premium ? ' (Premium)' : ''}.` : `Cheia nu merge: ${r.error}`, r.ok ? 'ok' : 'error');
+};
+$('#btn-jp-save').onclick = async () => {
+  const v = $('#jp-input').value; if (!v) return;
+  const r = await window.vp.act('setJoinPassword', v); $('#jp-input').value = '';
+  toast(r.ok ? 'Parola serverului e salvată (criptat).' : 'N-am putut salva parola.', r.ok ? 'ok' : 'error');
+};
+$('#jp-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-jp-save').click(); });
+$('#btn-jp-clear').onclick = async () => { await window.vp.act('setJoinPassword', null); toast('Parola ștearsă.'); };
+$('#btn-jp-detect').onclick = async () => {
+  const b = $('#btn-jp-detect'); b.disabled = true;
+  const r = await window.vp.act('detectJoinPassword'); b.disabled = false;
+  toast(!r.ok ? r.error : r.found ? 'Am luat parola de pe server (salvată criptat).' : 'Serverul nu are parolă.', r.ok ? 'ok' : 'error');
 };
 $('#btn-nexus-clear').onclick = async () => { await window.vp.act('setNexusKey', null); toast('Cheia Nexus ștearsă.'); };
 document.addEventListener('click', e => { const o = e.target.closest('a[data-open]'); if (o && !o.closest('#drawer')) { e.preventDefault(); window.vp.act('open', o.dataset.open); } });
@@ -784,7 +807,9 @@ function renderPlayer() {
   $('#pl-code').textContent = code || '——————';
   $('#pl-code-box').classList.toggle('off', !code);
   $('#pl-code2').textContent = code || '–';
-  $('#pl-addr').textContent = srv.address || 'cere-l adminului (sau intră cu join code)';
+  $('#pl-addr').textContent = srv.address || S.settings.joinTarget || 'cere-l adminului (sau intră cu join code)';
+  const direct = S.settings.directJoin && !!S.settings.joinTarget;
+  $('#pl-howto-direct').hidden = !direct; $('#pl-howto-manual').hidden = direct;
   $('#pl-game').innerHTML = P.game?.game ? esc(P.game.game) : '<span style="color:var(--red)">negăsit</span> · <a href="#" data-page-link="settings">alege folderul</a>';
 
   const btn = $('#btn-play'), g = S.game || {};

@@ -52,6 +52,11 @@ unmodified Electron binary, which Windows knows). Bifrost updates itself by down
 2. Open it - or in Bifrost: *I got an invite* and paste it.
 3. Press **PLAY**.
 
+**Joining directly**: with the server address known (from the list when the admin publishes the IP, from the server logs for the
+admin, or typed in Settings) PLAY starts Valheim with `+connect <address> -password <password>`: pick the character, press
+*Start* and you are on the server - no join code, no password prompt. The password is typed once in Settings → this server
+(stored encrypted; admins of a Docker server get it from the container).
+
 Mods go into `%APPDATA%\Bifrost\profiles\<server>` (Linux: `~/.config/Bifrost/profiles/<server>`). To load that profile, Bifrost puts the BepInEx doorstop
 (`winhttp.dll`, `doorstop_config.ini`, `doorstop_libs`) next to `valheim.exe`; what was there before (e.g. another mod
 manager's loader) is copied to `bifrost-backup` and can be restored in Settings.
