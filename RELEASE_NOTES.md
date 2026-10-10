@@ -1,4 +1,3 @@
-﻿## Bifrost 1.1.3
+﻿## Bifrost 1.1.4
 
-- More of the app in English (mod details, install hints, times like "5 min ago").
-- README with screenshots.
+- Importing from a valheim-server Docker image with ValheimPlus now adds ValheimPlus to the profile too: the image brings it on the server, but every player needs it (otherwise "Incompatible version: Server expects you to have org.bepinex.plugins.valheim_plus").

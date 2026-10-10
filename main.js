@@ -1033,6 +1033,13 @@ async function importInto(source) {
       }
       writeState(st);
       if (!mods.some(m => m.full === BEPINEX)) mods.unshift({ full: BEPINEX, ver: catalogIndex.get(BEPINEX)?.ver || '5.4.2351', title: 'BepInExPack Valheim' });
+      // the valheim-server image brings ValheimPlus itself (VALHEIM_PLUS=true), so it is not in the plugins folder -
+      // but every player needs it (the server enforces it): the Thunderstore package of the same fork goes in the profile
+      const VPLUS = 'Grantapher-ValheimPlus_Grantapher_Temporary';
+      if (builtin.test('ValheimPlus') && !mods.some(m => /ValheimPlus/i.test(m.full))) {
+        mods.push({ full: VPLUS, ver: catalogIndex.get(VPLUS)?.ver || '10.2.0', title: 'ValheimPlus' });
+        log('  + ValheimPlus (serverul îl are din imagine, jucătorii au nevoie de el)', 'out');
+      }
     }
     const names = new Set(mods.map(m => m.full));
     setProgress({ phase: 'install', text: '', done: 0, total: mods.length + manual.length });
