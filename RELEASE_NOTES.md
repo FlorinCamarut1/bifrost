@@ -1,3 +1,4 @@
-﻿## Bifrost 1.5.1
+﻿## Bifrost 1.5.2
 
-- **BepInEx console shows only errors** (Settings → Game → BepInEx console: Errors only / Hidden / Everything). The mods' harmless warnings no longer fill the window, and BepInEx no longer prints ~900 lines to a slow Windows console at every start. The full log is still in BepInEx/LogOutput.log. Applied before every PLAY, for players too; BepInEx.cfg is never synced to the server.
+- BepInEx console: the default is now **Without warnings** - mod loading, messages and errors are shown, only the warnings are left out (1.5.1 showed errors only, so a healthy start left the window empty). Settings → Game → BepInEx console also has Errors only / Hidden / Everything.
+- The two lines Steam prints itself ("Setting breakpad minidump AppID...") come from steam_api64.dll, not BepInEx, and stay.

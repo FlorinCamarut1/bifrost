@@ -73,7 +73,7 @@ const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true })
 const slug = s => String(s || 'server').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'server';
 
 const GLOBAL_DEFAULTS = {
-  lang: null, notifications: true, startWithWindows: null, gameDir: null, shortcutsV2: false, bepConsole: 'errors',
+  lang: null, notifications: true, startWithWindows: null, gameDir: null, shortcutsV2: false, bepConsoleMode: 'nowarn',
   nexusKeyEnc: null, nexusUser: null, githubTokenEnc: null, githubUser: null, activeServer: null, servers: [], shortcutTarget: null,
 };
 const SERVER_DEFAULTS = {
@@ -599,7 +599,7 @@ async function launchGame() {
   if (!game.game) throw new Error('Nu găsesc Valheim (Steam). Alege folderul jocului în Setări.');
   gameState.launching = true; sendGame();
   try {
-    try { getProfile().setConsole(G.bepConsole || 'errors'); } catch (e) { log(`BepInEx.cfg: ${e.message}`, 'error'); }
+    try { getProfile().setConsole(G.bepConsoleMode || 'nowarn'); } catch (e) { log(`BepInEx.cfg: ${e.message}`, 'error'); }
     getProfile().prepareGame(game.game);
     var join = await joinArgs();
     await getProfile().launch(game, join.args);
@@ -1372,7 +1372,7 @@ ipcMain.handle('action', async (_e, name, arg) => {
 ipcMain.handle('installUpdate', () => { quitting = true; app.relaunch(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE, args: process.argv.slice(1) } : undefined); app.quit(); });
 const SERVER_SETTABLE = { directJoin: 'directJoin', joinAddress: 'joinAddress', serverName: 'name', serverWorld: 'world', addresses: 'addresses', autoSync: 'autoSync', quietSeconds: 'quietSeconds', retryMinutes: 'retryMinutes',
   syncConfigs: 'syncConfigs', syncAllMods: 'syncAllMods', pullServerMods: 'pullServerMods', autoPublish: 'autoPublish', publishAddress: 'publishAddress', builtin: 'builtin', modpackTeam: 'modpackTeam', modpackName: 'modpackName' };
-const GLOBAL_SETTABLE = ['startWithWindows', 'notifications', 'gameDir', 'lang', 'bepConsole'];
+const GLOBAL_SETTABLE = ['startWithWindows', 'notifications', 'gameDir', 'lang', 'bepConsoleMode'];
 async function action(name, arg) {
   const s = srv();
   switch (name) {
