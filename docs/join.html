@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="ro">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bifrost - invitație</title>
-<meta name="description" content="Invitație pe un server Valheim cu moduri - deschide-o în Bifrost.">
+<title>Bifrost - invite</title>
+<meta name="description" content="An invite to a modded Valheim server - open it in Bifrost.">
 <style>
   :root { --bg: #0b1020; --panel: #151c31; --line: #2b3554; --text: #ebe5d5; --muted: #8b95b0; --gold: #e6c477; --gold2: #f4dfa6; }
   * { box-sizing: border-box; }
@@ -27,24 +27,24 @@
 <main class="card">
   <div class="rune">ᛉ</div>
   <h1 id="name">Server Valheim</h1>
-  <p class="muted" id="sub">Invitație pe un server cu moduri</p>
-  <a class="btn primary" id="open" href="#">Deschide în Bifrost</a>
-  <a class="btn" href="https://github.com/FlorinCamarut1/bifrost/releases/latest">Nu am Bifrost - descarcă-l</a>
+  <p class="muted" id="sub">Invite to a modded server</p>
+  <a class="btn primary" id="open" href="#">Open in Bifrost</a>
+  <a class="btn" href="https://github.com/FlorinCamarut1/bifrost/releases/latest">No Bifrost yet - download it</a>
   <ol>
-    <li>Instalează <b>Bifrost</b> (installer-ul sau varianta portabilă, zip).</li>
-    <li>Apasă <b>Deschide în Bifrost</b> - sau în Bifrost: <b>Am o invitație</b> și lipește codul:<br><code id="code">-</code></li>
-    <li>Apasă <b>JOACĂ</b>: modurile serverului se instalează singure.</li>
+    <li>Install <b>Bifrost</b> (the installer, or the portable zip).</li>
+    <li>Press <b>Open in Bifrost</b> - or in Bifrost: <b>I got an invite</b> and paste the code:<br><code id="code">-</code></li>
+    <li>Press <b>PLAY</b>: the server&#39;s mods install by themselves.</li>
   </ol>
 </main>
 <script>
   // the invite code is after the "#": g.<gist> | r.<owner>/<repo>[/path] | u.<base64url>
   const code = decodeURIComponent(location.hash.slice(1));
   const $ = id => document.getElementById(id);
-  if (!/^[gru]\.[\w./-]+$/.test(code)) { $('sub').innerHTML = '<span class="err">Linkul de invitație e incomplet.</span>'; $('open').style.display = 'none'; }
+  if (!/^[gru]\.[\w./-]+$/.test(code)) { $('sub').innerHTML = '<span class="err">This invite link is incomplete.</span>'; $('open').style.display = 'none'; }
   else {
     $('code').textContent = code;
     $('open').href = 'bifrost://join/' + code;
-    const show = m => { $('name').textContent = (m.server && m.server.name) || 'Server Valheim'; $('sub').textContent = `${m.required.length} moduri pe server${m.server && m.server.world ? ' · lumea ' + m.server.world : ''}`; document.title = `Bifrost - ${$('name').textContent}`; };
+    const show = m => { $('name').textContent = (m.server && m.server.name) || 'Server Valheim'; $('sub').textContent = `${m.required.length} mods on the server${m.server && m.server.world ? ' · world ' + m.server.world : ''}`; document.title = `Bifrost - ${$('name').textContent}`; };
     const read = code.startsWith('g.') ? fetch('https://api.github.com/gists/' + code.slice(2)).then(r => r.json()).then(g => JSON.parse((g.files['server.json'] || Object.values(g.files)[0]).content))
       : code.startsWith('r.') ? (() => { const p = code.slice(2).split('/'); return fetch(`https://api.github.com/repos/${p[0]}/${p[1]}/contents/${p.slice(2).join('/') || 'server.json'}`, { headers: { Accept: 'application/vnd.github.raw+json' } }).then(r => r.json()); })()
         : null;
