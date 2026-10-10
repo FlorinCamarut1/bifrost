@@ -74,7 +74,7 @@ function renderStatus() {
   $('#srv-players-note').textContent = s.idle === true ? 'server gol' : s.idle === false ? 'trafic de jucători' : '';
   const addrs = (S.settings.addresses || '').split(/[;\n]/).map(x => x.split('=')).filter(x => x[1]).map(([k, v]) => [k.trim(), v.trim()]);
   if (s.publicIp) addrs.push(['Public (prieteni)', s.publicIp]);
-  $('#srv-addresses').innerHTML = addrs.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><code>${esc(v)}</code><button class="icon-btn" data-copy="${esc(v)}" title="Copiază">⧉</button></div>`).join('');
+  $('#srv-addresses').innerHTML = addrs.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><code>${esc(v)}</code><button class="icon-btn" data-copy="${esc(v)}" title="Copiază"><svg class="ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button></div>`).join('');
   $('#srv-recent').innerHTML = (s.recent || []).length
     ? s.recent.map(r => `<span class="tag" title="ultima intrare ${esc(r.t ? clock(r.t) : '')}">${esc(r.name)}</span>`).join('')
     : '<span class="muted small">nimeni încă</span>';
@@ -605,7 +605,7 @@ function renderPlayer() {
   $('#pl-world').textContent = [srv.world, m?.updatedAt ? `lista actualizată ${ago(m.updatedAt)}` : ''].filter(Boolean).join(' · ');
   $('#brand-sub').textContent = S.settings.server?.name || srv.name || 'Valheim';
   const pill = $('#pl-pill'); pill.className = 'status-pill';
-  const need = P.plan.install.length + P.plan.remove.length;
+  const need = (P.plan?.install.length || 0) + (P.plan?.remove.length || 0);
   if (own && !S.job) { $('#pl-state').textContent = 'gata de joc'; pill.classList.add('ok'); }
   else if (!m) { $('#pl-state').textContent = P.error ? 'fără listă' : 'se încarcă...'; pill.classList.add(P.error ? 'err' : 'busy'); }
   else if (S.job) { $('#pl-state').textContent = 'lucrez...'; pill.classList.add('busy'); }
@@ -635,7 +635,7 @@ function renderPlayer() {
   else { ring.className = 'ring ok'; $('#pl-mods-title').textContent = `Toate cele ${P.required} moduri ale serverului sunt instalate`; $('#pl-mods-sub').textContent = `${P.installed} pachete în profil`; }
   const plan = $('#pl-plan');
   plan.hidden = !need || !!S.job;
-  plan.textContent = [...P.plan.install.slice(0, 12).map(x => `${x.have ? '↑' : '+'} ${x.title || x.key} ${x.have ? `${x.have} → ` : ''}${x.ver}`),
+  if (P.plan) plan.textContent = [...P.plan.install.slice(0, 12).map(x => `${x.have ? '↑' : '+'} ${x.title || x.key} ${x.have ? `${x.have} → ` : ''}${x.ver}`),
     ...(P.plan.install.length > 12 ? [`... și încă ${P.plan.install.length - 12}`] : []), ...P.plan.remove.map(k => `− ${k}`)].join('\n');
 
   // recommended
