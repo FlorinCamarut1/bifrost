@@ -119,6 +119,13 @@
     'Token șters.': 'Token removed.', 'Catalog actualizat.': 'Catalog updated.', 'Legătură scoasă.': 'Link removed.', 'Serverul nu are încă o listă publicată.': 'The server has no published list yet.',
     'Lista nu e publicată încă.': 'The list is not published yet.', 'lista nu e publicată încă': 'the list is not published yet', 'fără conexiune - doar lista': 'no connection - list only',
     'Toate modurile sunt la ultima versiune.': 'All mods are at the latest version.', 'Totul e la zi.': 'Everything is up to date.', 'Bifrost 1.1': 'Bifrost 1.1',
+    // ---- discover drawer ----
+    'Mod de server:': 'Server mod:', 'îl primește și serverul, iar toți jucătorii trebuie să-l aibă (îl primesc prin lista serverului).': 'the server gets it too, and every player needs it (they get it through the server list).',
+    'Mod de client:': 'Client mod:', 'rămâne doar pe PC-ul tău.': 'it stays only on your PC.', 'actualizat': 'updated',
+    'Thunderstore nu spune unde rulează. Bifrost ghicește la sync (README / DLL), iar tu poți schimba la Moduri.': 'Thunderstore does not say where it runs. Bifrost guesses at sync (README / DLL); you can change it under Mods.',
+    'Nexus nu spune dacă un mod e de server sau de client - citește descrierea de pe Nexus.': 'Nexus does not say whether a mod is server or client - read its description on Nexus.',
+    'După instalare îl marchezi la': 'After installing, mark it under', '(Server / Client).': '(Server / Client).', 'Doar arhivele .zip și .7z se pot instala automat.': 'zip, 7z, rar and bare DLLs install automatically.',
+    'endorsements': 'endorsements', 'Fișiere': 'Files', 'Niciun fișier activ.': 'No active files.',
     // ---- update ----
     'Update': 'Update', 'Verifică acum': 'Check now', 'Repornește și actualizează': 'Restart and update', 'Descarcă': 'Download', 'Bifrost': 'Bifrost',
     // ---- main process ----
@@ -137,7 +144,7 @@
     [/^Profilul Bifrost · (\d+) moduri · (\d+) pe server$/, 'Bifrost profile · $1 mods · $2 on server'],
     [/^pornit de (\d+) h (\d+) min$/, 'up for $1 h $2 min'], [/^pornit de (\d+) min$/, 'up for $1 min'],
     [/^acum câteva secunde$/, 'a few seconds ago'], [/^acum (\d+) min$/, '$1 min ago'], [/^acum (\d+) h (\d+) min$/, '$1 h $2 min ago'], [/^acum (\d+) zile$/, '$1 days ago'],
-    [/^ultima verificare (.+)$/, 'last check $1'], [/^publicată (.+)$/, 'published $1'], [/^lista actualizată (.+)$/, 'list updated $1'], [/^a început (.+)$/, 'started $1'],
+    [/^ultima verificare (.+)$/, (m, a) => 'last check ' + t(a)], [/^publicată (.+)$/, (m, a) => 'published ' + t(a)], [/^lista actualizată (.+)$/, (m, a) => 'list updated ' + t(a)], [/^a început (.+)$/, (m, a) => 'started ' + t(a)], [/^cod$/, 'code'], [/^Dependențe \((\d+)\) - se instalează automat$/, 'Dependencies ($1) - installed automatically'], [/^✓ ai (.+)$/, '✓ you have $1'],
     [/^Toate cele (\d+) moduri ale serverului sunt instalate$/, 'All $1 server mods are installed'], [/^(\d+) pachete în profil$/, '$1 packages in the profile'],
     [/^(\d+) moduri de instalat \/ actualizat$/, '$1 mods to install / update'], [/^întâi: (\d+) de instalat(.*)$/, 'first: $1 to install$2'],
     [/^Catalogul Thunderstore pentru Valheim · (.+) moduri · actualizat (.+)$/, 'The Thunderstore catalog for Valheim · $1 mods · updated $2'],

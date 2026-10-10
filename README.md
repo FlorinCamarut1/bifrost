@@ -11,6 +11,11 @@ the server's mods.
 
 English by default, Romanian available (Settings → Language).
 
+| Play | Mods (admin) | Discover |
+|---|---|---|
+| ![Play: the server, its join code and one PLAY button](docs/screenshots/play.png) | ![Mods: every mod is Server or Client, synced to the server](docs/screenshots/mods.png) | ![Discover: Thunderstore and Nexus Mods, with details and dependencies](docs/screenshots/discover.png) |
+| A friend opened the invite: the server's 30 mods are installed, PLAY starts Valheim with them. | The admin marks each mod *Server* or *Client*; Bifrost keeps the server in sync and publishes the list. | Browse Thunderstore and Nexus Mods; *Install* puts the mod and its dependencies into the server's profile. |
+
 ## Install
 
 Download from [Releases](../../releases/latest):

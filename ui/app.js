@@ -530,9 +530,10 @@ function renderHowto() {
   let seen = false; try { seen = !!localStorage.getItem('howtoSeen'); } catch { }
   const h = $('#br-howto');
   h.hidden = seen || S.src === 'nx';
-  h.querySelector('span').innerHTML = S.settings.isAdmin
-    ? '<b>Cum se instalează:</b> apeși <b>Instalează</b>, se deschide Thunderstore Mod Manager și pune modul (cu dependențele) în profilul tău. Restul e automat: serverul îl primește dacă e mod de server, iar prietenii îl primesc prin lista publicată.'
-    : '<b>Cum se instalează:</b> apeși <b>Instalează</b> și Bifrost pune modul (cu dependențele) în profilul tău. Modurile cerute de server nu trebuie căutate aici - se instalează singure când apeși <b>JOACĂ</b>.';
+  const en = (S.settings.lang || 'en') === 'en', admin = S.settings.isAdmin;
+  h.querySelector('span').innerHTML = en
+    ? `<b>How to install:</b> press <b>Install</b> and Bifrost puts the mod (with its dependencies) into this server's profile. ${admin ? 'Server mods go to the server too, and your friends get them through the list.' : 'The mods the server needs are not searched here - they install by themselves when you press <b>PLAY</b>.'}`
+    : `<b>Cum se instalează:</b> apeși <b>Instalează</b> și Bifrost pune modul (cu dependențele) în profilul serverului. ${admin ? 'Modurile de server ajung și pe server, iar prietenii le primesc prin listă.' : 'Modurile cerute de server nu trebuie căutate aici - se instalează singure când apeși <b>JOACĂ</b>.'}`;
 }
 $('#br-howto-x').onclick = () => { $('#br-howto').hidden = true; try { localStorage.setItem('howtoSeen', '1'); } catch { } };
 
@@ -557,9 +558,9 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.drawer) 
 function drawerHead(p) {
   const deps = (p.deps || []).map(d => { const m = d.match(/^(.+)-(\d+\.\d+\.\d+)$/); return m ? { full: m[1], ver: m[2] } : { full: d, ver: '' }; });
   const c = p.cats || [];
-  const where = c.includes('Server-side') ? '<b>Mod de server:</b> îl primește și serverul, iar toți jucătorii trebuie să-l aibă (vine prin modpack).'
+  const where = c.includes('Server-side') ? '<b>Mod de server:</b> îl primește și serverul, iar toți jucătorii trebuie să-l aibă (îl primesc prin lista serverului).'
     : c.includes('Client-side') ? '<b>Mod de client:</b> rămâne doar pe PC-ul tău.'
-      : 'Thunderstore nu spune unde rulează. App-ul ghicește la sync (README / DLL), iar tu poți schimba la Moduri.';
+      : 'Thunderstore nu spune unde rulează. Bifrost ghicește la sync (README / DLL), iar tu poți schimba la Moduri.';
   return `
     <div class="dr-head">${p.icon ? `<img src="${esc(p.icon)}" alt="">` : '<div class="ph"></div>'}
       <div><h2>${esc(pkTitle(p))}</h2><div class="muted">de ${esc(p.owner)} · v${esc(p.ver)}</div>

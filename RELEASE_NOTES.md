@@ -1,3 +1,4 @@
-﻿## Bifrost 1.1.2
+﻿## Bifrost 1.1.3
 
-- Importing "what the server already runs" no longer marks every mod as a server mod: client mods on the server stay client (from Thunderstore's categories, or guessed from the mod at the first sync).
+- More of the app in English (mod details, install hints, times like "5 min ago").
+- README with screenshots.
