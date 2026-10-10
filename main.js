@@ -713,11 +713,12 @@ async function installNexus(entry, nxm, pr = getProfile()) {
   nexus.key = key;
   const url = await nexus.downloadUrl(entry.modId, entry.fileId, nxm);
   setProgress({ ...progress, text: `${entry.title} (Nexus)`, bytes: 0, totalBytes: 0 });
-  const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || `${entry.modId}-${entry.fileId}.zip`);
-  if (!/\.(zip|7z)$/i.test(name)) throw new Error(`${entry.title}: arhiva ${path.extname(name)} nu e suportată (doar .zip / .7z)`);
+  // newer Nexus files have extension-less CDN names: the archive type is read from the file itself (lib/archive.js)
+  const name = (decodeURIComponent(new URL(url).pathname.split('/').pop() || '').replace(/[^\w.\- ]+/g, '_') || 'file').slice(-80);
   const zip = await pr.download(url, path.join(pr.cacheDir, 'nexus', `${entry.modId}-${entry.fileId}-${name}`), (got, total) => setProgress({ ...progress, bytes: got, totalBytes: total }));
+  const dllName = `${String(entry.title || entry.key).replace(/[^\w.\-]+/g, '_')}.dll`;
   await pr.installZip(entry.key, zip, { ver: entry.ver, role: entry.role, source: 'nexus', title: entry.title, modId: entry.modId, fileId: entry.fileId, size: fs.statSync(zip).size },
-    Profile.nexusMap(entry.key));
+    Profile.nexusMap(entry.key), dllName);
   log(`  instalat ${entry.title} (Nexus ${entry.modId})`, 'out');
 }
 

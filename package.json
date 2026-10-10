@@ -1,7 +1,7 @@
 {
   "name": "bifrost",
   "productName": "Bifrost",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Valheim mod manager and server companion",
   "main": "main.js",
   "private": true,
@@ -15,7 +15,8 @@
     "dompurify": "^3.4.16",
     "electron-updater": "^6.8.9",
     "js-yaml": "4.1.0",
-    "marked": "^17.0.6"
+    "marked": "^17.0.6",
+    "node-unrar-js": "^2.0.2"
   },
   "devDependencies": {
     "electron": "44.4.5",
@@ -37,6 +38,7 @@
     ],
     "asarUnpack": [
       "node_modules/7zip-bin/win/**",
+      "node_modules/node-unrar-js/dist/js/unrar.wasm",
       "catalog-worker.js"
     ],
     "win": {
