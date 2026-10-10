@@ -1,7 +1,7 @@
 {
   "name": "bifrost",
   "productName": "Bifrost",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "Valheim mod manager and server companion",
   "main": "main.js",
   "private": true,
@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "7zip-bin": "^5.2.0",
+    "basic-ftp": "^5.3.1",
     "dompurify": "^3.4.16",
-    "electron-updater": "^6.8.9",
     "js-yaml": "4.1.0",
     "marked": "^17.0.6",
     "node-unrar-js": "^2.0.2"
@@ -35,7 +35,8 @@
       "lib/**",
       "ui/**",
       "package.json",
-      "!build/**"
+      "!build/**",
+      "!docs/**"
     ],
     "asarUnpack": [
       "node_modules/7zip-bin/win/**",
@@ -46,6 +47,12 @@
       "target": [
         {
           "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "x64"
           ]
@@ -75,6 +82,14 @@
       {
         "from": "ui/app.ico",
         "to": "app.ico"
+      }
+    ],
+    "protocols": [
+      {
+        "name": "Bifrost invite",
+        "schemes": [
+          "bifrost"
+        ]
       }
     ]
   }

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bifrost - invitație</title>
+<meta name="description" content="Invitație pe un server Valheim cu moduri - deschide-o în Bifrost.">
+<style>
+  :root { --bg: #0b1020; --panel: #151c31; --line: #2b3554; --text: #ebe5d5; --muted: #8b95b0; --gold: #e6c477; --gold2: #f4dfa6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: radial-gradient(900px 500px at 50% -10%, #1c2748, transparent 70%), var(--bg); color: var(--text);
+    font: 15px/1.5 "Segoe UI", system-ui, sans-serif; display: grid; place-items: center; padding: 24px 16px; }
+  .card { width: min(520px, 100%); background: linear-gradient(180deg, #1a2238, var(--panel)); border: 1px solid var(--line); border-radius: 18px; padding: 32px 28px; text-align: center; box-shadow: 0 30px 80px #0008; }
+  .rune { width: 84px; height: 84px; margin: 0 auto 16px; border-radius: 20px; display: grid; place-items: center; font-size: 46px; color: var(--gold2);
+    background: linear-gradient(180deg, #22305a, #0b1122); border: 2px solid #e6c47766; font-family: Cambria, Georgia, serif; }
+  h1 { font-family: Cambria, Georgia, serif; margin: 0 0 4px; font-size: 28px; letter-spacing: .04em; }
+  .muted { color: var(--muted); }
+  .btn { display: block; margin: 12px 0 0; padding: 13px 18px; border-radius: 12px; font-weight: 700; text-decoration: none; border: 1px solid var(--line); color: var(--text); background: #ffffff0a; }
+  .btn.primary { background: linear-gradient(180deg, #f0d189, #d9b05a); color: #1b1606; border-color: #f4dfa6; }
+  code { display: inline-block; margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: #0b1020; border: 1px solid var(--line); word-break: break-all; font-size: 13px; }
+  ol { text-align: left; color: var(--muted); padding-left: 20px; margin: 22px 0 0; }
+  ol b { color: var(--text); }
+  .err { color: #ef8b8b; }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="rune">ᛉ</div>
+  <h1 id="name">Server Valheim</h1>
+  <p class="muted" id="sub">Invitație pe un server cu moduri</p>
+  <a class="btn primary" id="open" href="#">Deschide în Bifrost</a>
+  <a class="btn" href="https://github.com/FlorinCamarut1/bifrost/releases/latest">Nu am Bifrost - descarcă-l</a>
+  <ol>
+    <li>Instalează <b>Bifrost</b> (installer-ul sau varianta portabilă, zip).</li>
+    <li>Apasă <b>Deschide în Bifrost</b> - sau în Bifrost: <b>Am o invitație</b> și lipește codul:<br><code id="code">-</code></li>
+    <li>Apasă <b>JOACĂ</b>: modurile serverului se instalează singure.</li>
+  </ol>
+</main>
+<script>
+  // the invite code is after the "#": g.<gist> | r.<owner>/<repo>[/path] | u.<base64url>
+  const code = decodeURIComponent(location.hash.slice(1));
+  const $ = id => document.getElementById(id);
+  if (!/^[gru]\.[\w./-]+$/.test(code)) { $('sub').innerHTML = '<span class="err">Linkul de invitație e incomplet.</span>'; $('open').style.display = 'none'; }
+  else {
+    $('code').textContent = code;
+    $('open').href = 'bifrost://join/' + code;
+    const show = m => { $('name').textContent = (m.server && m.server.name) || 'Server Valheim'; $('sub').textContent = `${m.required.length} moduri pe server${m.server && m.server.world ? ' · lumea ' + m.server.world : ''}`; document.title = `Bifrost - ${$('name').textContent}`; };
+    const read = code.startsWith('g.') ? fetch('https://api.github.com/gists/' + code.slice(2)).then(r => r.json()).then(g => JSON.parse((g.files['server.json'] || Object.values(g.files)[0]).content))
+      : code.startsWith('r.') ? (() => { const p = code.slice(2).split('/'); return fetch(`https://api.github.com/repos/${p[0]}/${p[1]}/contents/${p.slice(2).join('/') || 'server.json'}`, { headers: { Accept: 'application/vnd.github.raw+json' } }).then(r => r.json()); })()
+        : null;
+    if (read) read.then(show).catch(() => { });
+  }
+</script>
+</body>
+</html>

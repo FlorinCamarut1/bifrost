@@ -309,3 +309,58 @@ a[data-open] { color: var(--blue); cursor: pointer; }
 .pk .nx-cat { font-size: 10.5px; padding: 1px 7px; border-radius: 6px; background: #ffffff0a; color: var(--muted); border: 1px solid var(--line2); }
 .nx-file { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 9px 12px; border-radius: 10px; background: #ffffff06; margin-bottom: 6px; }
 .nx-file b { font-size: 13px; } .nx-file small { color: var(--muted); display: block; font-size: 11.5px; }
+
+/* mod row actions: Server/Client + uninstall stay together on the right */
+.mod-actions { display: flex; align-items: center; gap: 8px; justify-self: end; flex-wrap: nowrap; }
+.seg { flex: none; }
+.seg button { white-space: nowrap; }
+.mod-actions .icon-btn { font-size: 14px; padding: 6px 8px; }
+.mod-actions .icon-btn:hover { color: var(--red); }
+@media (max-width: 760px) { .mod { grid-template-columns: 44px 1fr; } .mod-actions { grid-column: 1 / -1; justify-self: end; } }
+
+/* server switcher */
+.srv-switch { position: relative; margin-bottom: 10px; }
+.srv-current { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 12px; border: 1px solid var(--line2); background: var(--panel); cursor: pointer; text-align: left; }
+.srv-current:hover { border-color: #3a4870; }
+.srv-current svg { margin-left: auto; color: var(--muted); }
+.srv-badge { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(180deg, #f0d189, #d9b05a); color: #1b1606; font-weight: 800; font-family: var(--serif); flex: none; }
+.srv-cur-text { min-width: 0; }
+.srv-cur-text b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srv-cur-text small { color: var(--muted); font-size: 11px; }
+.srv-menu { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 30; background: var(--panel2); border: 1px solid var(--line2); border-radius: 12px; padding: 6px; box-shadow: 0 20px 50px #000a; }
+.srv-item { width: 100%; display: flex; align-items: center; gap: 9px; padding: 8px; border: 0; background: none; border-radius: 8px; cursor: pointer; text-align: left; font-size: 13px; }
+.srv-item:hover { background: #ffffff0c; }
+.srv-item.on { color: var(--gold2); }
+.srv-item small { margin-left: auto; color: var(--muted); font-size: 11px; }
+.srv-menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
+body.no-server [data-need="server"] { display: none !important; }
+body:not(.no-server) [data-need="none"] { display: none !important; }
+
+/* welcome */
+.welcome-hero { text-align: center; padding: 30px 0 10px; }
+.welcome-hero img { width: 96px; height: 96px; border-radius: 22px; box-shadow: 0 20px 60px #e6c47733; }
+.welcome-hero h1 { font-size: 34px; margin: 18px 0 6px; }
+.welcome-card h2 { color: var(--gold2); }
+.welcome-card .btn { margin-top: 6px; }
+
+/* invite */
+.invite { margin: 12px 0; padding: 12px 14px; border-radius: 12px; background: #0b1020aa; border: 1px solid var(--line); }
+.invite code { word-break: break-all; }
+
+/* wizard */
+.modal-box.wide { width: min(640px, 94vw); max-height: 88vh; display: flex; flex-direction: column; }
+.wiz-body { overflow-y: auto; padding-right: 4px; margin-bottom: 16px; }
+.wiz-sec { margin-bottom: 18px; }
+.wiz-sec h4 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.field { display: flex; flex-direction: column; gap: 5px; flex: 1; margin-bottom: 10px; }
+.field > span { font-size: 12px; color: var(--muted); }
+.field .txt { width: 100%; }
+.field.small-f { flex: 0 0 90px; }
+.wz-fields { display: flex; gap: 10px; }
+.radio { display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); margin-bottom: 6px; cursor: pointer; }
+.radio:hover { border-color: var(--line2); }
+.radio input { margin-top: 3px; accent-color: #e6c477; }
+.radio b { display: block; font-size: 13px; }
+.radio small { color: var(--muted); font-size: 12px; }
+#wz-local, #wz-code { width: 100%; margin: 0 0 8px; }
+#wz-type { width: 100%; margin-bottom: 12px; }

@@ -1,0 +1,36 @@
+# Builds Bifrost on a clean Windows runner when a v* tag is pushed and publishes the release:
+#   Bifrost-Setup-<v>.exe   installer (first install)
+#   Bifrost-<v>-win.zip     portable (unzip + run Bifrost.exe; works where Smart App Control blocks new installers)
+#   bifrost-app-<v>-e<N>.zip  code bundle the app updates itself from (no new executable; N = Electron major)
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder --win nsis zip --publish never
+      - name: Code bundle
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $e = ((Get-Content node_modules/electron/package.json -Raw | ConvertFrom-Json).version -split '\.')[0]
+          Compress-Archive -Path dist/win-unpacked/resources/app.asar, dist/win-unpacked/resources/app.asar.unpacked -DestinationPath "dist/bifrost-app-$v-e$e.zip"
+      - name: Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = @(Get-ChildItem dist -File | Where-Object { $_.Name -match '\.(exe|zip|blockmap|yml)$' -and $_.Name -notmatch 'uninstaller|builder-' } | ForEach-Object { $_.FullName })
+          $notes = if (Test-Path RELEASE_NOTES.md) { 'RELEASE_NOTES.md' } else { $null }
+          if ($notes) { gh release create $env:GITHUB_REF_NAME $files --title "Bifrost $($env:GITHUB_REF_NAME.TrimStart('v'))" --notes-file $notes }
+          else { gh release create $env:GITHUB_REF_NAME $files --title "Bifrost $($env:GITHUB_REF_NAME.TrimStart('v'))" --generate-notes }

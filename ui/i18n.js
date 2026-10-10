@@ -1,0 +1,169 @@
+// English for Bifrost. The app is written in Romanian; this translates what reaches the screen (text nodes,
+// placeholders, titles, notifications): exact strings first, then patterns for text with values in it.
+// Used by the renderer (window.bifrostI18n) and by main.js (require) for notifications.
+(function (root) {
+  const EN = {
+    // ---- navigation / common ----
+    'Joacă': 'Play', 'JOACĂ': 'PLAY', 'Server': 'Server', 'Moduri': 'Mods', 'Descoperă': 'Discover', 'Modpack': 'Modpack', 'Jurnal': 'Log', 'Setări': 'Settings', 'Start': 'Start',
+    'Niciun server': 'No server', 'adaugă unul': 'add one', 'admin': 'admin', 'jucător': 'player', 'profil personal': 'personal profile',
+    '＋ Am o invitație': '＋ I have an invite', '＋ Creează server': '＋ Create server', '＋ Profil personal': '＋ Personal profile',
+    'Auto-sync': 'Auto-sync', 'la zi': 'up to date', 'lucrez...': 'working...', 'oprit': 'off', 'pornit': 'on',
+    'Copiază': 'Copy', 'Anulează': 'Cancel', 'Salvează': 'Save', 'Șterge': 'Delete', 'Da': 'Yes', 'OK': 'OK', 'Adaugă': 'Add', 'Creează': 'Create', 'Importă': 'Import', 'Închide': 'Close',
+    'Schimbă': 'Change', 'Conectează': 'Connect', 'Deconectează': 'Disconnect', 'Token': 'Token', 'Publică': 'Publish', 'Restart': 'Restart', 'Dezinstalează': 'Uninstall', 'Instalează': 'Install',
+    'se încarcă...': 'loading...', 'se verifică...': 'checking...', 'automat': 'automatic', 'Automat': 'Automatic', 'Am înțeles': 'Got it', 'Copiază linkul': 'Copy link',
+    // ---- welcome ----
+    'Bun venit în Bifrost': 'Welcome to Bifrost',
+    'Moduri Valheim pentru jocul cu prietenii pe același server - fiecare are exact modurile serverului, la zi.': 'Valheim mods for playing with friends on one server - everyone has exactly the server\'s mods, up to date.',
+    'Am primit o invitație': 'I got an invite',
+    'Lipește linkul sau codul de la adminul serverului (ex.': 'Paste the link or code from the server\'s admin (e.g.',
+    '). Bifrost îți face un profil pentru serverul acela și instalează modurile lui.': '). Bifrost makes a profile for that server and installs its mods.',
+    'Am un server': 'I run a server',
+    'Pentru cine ține serverul: Bifrost îi pune modurile (SSH, Docker, folder local sau FTP), îl repornește când nu e nimeni și le dă prietenilor un link de invitație.': 'For whoever hosts the server: Bifrost puts the mods on it (SSH, Docker, local folder or FTP), restarts it when nobody plays and gives friends an invite link.',
+    'Creează server': 'Create server', 'Doar moduri, fără server': 'Just mods, no server',
+    'Un profil personal: din Thunderstore Mod Manager / r2modman, dintr-un cod de profil Thunderstore sau gol.': 'A personal profile: from Thunderstore Mod Manager / r2modman, from a Thunderstore profile code, or empty.',
+    'Profil personal': 'Personal profile', 'bifrost://join/… sau g.…': 'bifrost://join/… or g.…',
+    // ---- home ----
+    'Join code': 'Join code', 'Instalez modurile...': 'Installing mods...', 'Modurile serverului': 'Server mods',
+    'Actualizează fără să pornesc jocul': 'Update without starting the game', 'Verifică lista': 'Check the list', 'Conectare': 'How to join', 'Adresă server': 'Server address', 'Valheim': 'Valheim',
+    'În joc:': 'In game:', '(adresa) sau': '(the address) or', '. Bifrost pornește Valheim prin Steam, cu modurile serverului.': '. Bifrost starts Valheim through Steam with the server\'s mods.',
+    'Recomandate de admin': 'Recommended by the admin', 'opționale, doar pe PC-ul tău': 'optional, only on your PC',
+    'gata de joc': 'ready to play', 'are nevoie de update': 'needs an update', 'fără listă': 'no list', 'modurile sunt la zi': 'mods are up to date',
+    'Se pregătește...': 'Getting ready...', 'Lucrez...': 'Working...', 'cere-l adminului (sau intră cu join code)': 'ask the admin (or join by code)', 'negăsit': 'not found', 'alege folderul': 'choose the folder',
+    'Se fac singure când apeși JOACĂ.': 'They happen by themselves when you press PLAY.', 'Iau lista serverului...': 'Getting the server list...', 'Nu am putut lua lista serverului': 'Could not get the server list',
+    'Deschide pagina': 'Open the page',
+    // ---- my mods ----
+    'Modurile mele': 'My mods', 'Profilul Bifrost': 'Bifrost profile', 'Deschide folderul': 'Open folder', 'Actualizează': 'Update',
+    'Pentru server': 'For the server', 'Recomandate': 'Recommended', 'Adăugate de tine': 'Added by you', 'Dependențe': 'Dependencies', 'cerut de server': 'required by server',
+    'Le cere serverul - se instalează și se actualizează singure.': 'The server needs them - they install and update by themselves.',
+    'Alese de tine din recomandările adminului.': 'Your picks from the admin\'s recommendations.', 'Din Descoperă sau de pe Nexus.': 'From Discover or Nexus.',
+    'Cerute de alte moduri - se scot singure când nu mai e nevoie de ele.': 'Needed by other mods - removed by themselves when no longer needed.',
+    'Niciun mod încă - apasă JOACĂ și Bifrost instalează modurile serverului.': 'No mods yet - press PLAY and Bifrost installs the server\'s mods.',
+    // ---- server ----
+    'online': 'online', 'fără conexiune': 'no connection', 'fără conexiune la server': 'no server connection', 'pornește...': 'starting...', 'online · join code stricat?': 'online · broken join code?', 'container lipsă': 'container missing',
+    'Jucători online': 'Players online', 'server gol': 'server empty', 'trafic de jucători': 'player traffic', 'nimeni încă': 'nobody yet',
+    'Join code-ul poate să nu meargă.': 'The join code may not work.',
+    'Verificarea codului a crăpat pe server („Couldn\'t resolve join code”). Repornește doar jocul ca să primească un cod nou.': 'The code check crashed on the server ("Couldn\'t resolve join code"). Restart just the game to get a new code.',
+    'Repară join code': 'Fix join code', 'Sincronizare moduri': 'Mod sync', 'Sincronizează acum': 'Sync now', 'Verifică diferențele': 'Check differences', 'Văzuți de la pornire': 'Seen since start',
+    'Restart server': 'Restart server', 'Join code nou': 'New join code', 'Pornește serverul': 'Start the server', 'Reîmprospătează': 'Refresh', 'Lista pentru prieteni': 'List for friends',
+    'Bifrost-ul prietenilor citește lista asta și le instalează exact modurile serverului.': 'Your friends\' Bifrost reads this list and installs exactly the server\'s mods.',
+    'Link de invitație': 'Invite link', 'Cod': 'Code', 'Copiază mesajul pentru prieteni': 'Copy the message for friends', 'Publică acum': 'Publish now', 'Vezi lista ↗': 'View list ↗',
+    'Activitate recentă': 'Recent activity', 'Tot jurnalul →': 'Full log →', 'Serverul e la zi': 'The server is up to date', 'încă nepublicată': 'not published yet', 'nepublicată': 'not published', 'public...': 'publishing...',
+    'Lista se creează la prima publicare (un Gist privat pe contul tău GitHub) - apoi primești linkul de invitație.': 'The list is created on the first publish (a secret Gist on your GitHub account) - then you get the invite link.',
+    'Ai schimbări nesincronizate': 'You have unsynced changes', 'Auto-sync oprit': 'Auto-sync off', 'Apasă „Sincronizează acum” când vrei.': 'Press "Sync now" when you want.',
+    'Restart amânat - sunt jucători online': 'Restart postponed - players are online', 'Sincronizarea a eșuat': 'Sync failed', 'Necesită atenție': 'Needs attention',
+    'Configurări: se verifică...': 'Configs: checking...', 'verifică acum': 'check now', 'modurile s-au schimbat...': 'mods changed...', 'sincronizez...': 'syncing...',
+    // ---- mods ----
+    'Importă moduri': 'Import mods', 'Actualizează tot': 'Update all', 'Caută update-uri': 'Check for updates', 'Sincronizează': 'Sync', 'Caută un mod...': 'Search mods...',
+    'Toate': 'All', 'Pe server': 'On server', 'Doar client': 'Client only', 'Update-uri': 'Updates', 'Dezactivate': 'Disabled', 'Client': 'Client',
+    '= îl primește și serverul (și toți jucătorii trebuie să-l aibă).': '= the server gets it too (and every player must have it).',
+    '= doar pe PC-ul tău. Dependențele modurilor de server merg automat pe server. ValheimPlus și BepInEx vin din imaginea serverului.': '= only on your PC. Dependencies of server mods go to the server automatically.',
+    'pe server': 'on server', 'urmează pe server': 'going to the server', 'nou - se ghicește la sync': 'new - guessed at sync', 'inclus în server': 'part of the server', 'dezactivat': 'disabled', 'manual': 'manual',
+    'manual · leagă de Nexus': 'manual · link to Nexus', 'modpack-ul tău': 'your modpack', 'se actualizează...': 'updating...', 'Niciun mod aici.': 'No mods here.',
+    // ---- browse ----
+    'Descoperă moduri': 'Discover mods', 'Catalogul Thunderstore pentru Valheim': 'The Thunderstore catalog for Valheim', 'Thunderstore': 'Thunderstore', 'Nexus Mods': 'Nexus Mods',
+    'Cele mai descărcate': 'Most downloaded', 'Cele mai apreciate': 'Top rated', 'Actualizate recent': 'Recently updated', 'Cele mai noi': 'Newest', 'Modpack-uri': 'Modpacks',
+    'Caută în Thunderstore...': 'Search Thunderstore...', 'Caută pe Nexus Mods...': 'Search Nexus Mods...', '✓ Instalat': '✓ Installed', 'Se instalează': 'Installing',
+    'Aștept click pe Nexus': 'Waiting for the Nexus click', 'Nimic găsit.': 'Nothing found.', 'Pe Thunderstore ↗': 'On Thunderstore ↗', 'Pe Nexus ↗': 'On Nexus ↗',
+    'Descriere': 'Description', 'Fișiere': 'Files', 'Categorii': 'Categories', 'descărcări': 'downloads', 'aprecieri': 'ratings', 'Caut pe Nexus...': 'Searching Nexus...',
+    // ---- modpack ----
+    'Modpack-ul serverului pe Thunderstore (pentru cine folosește un mod manager).': 'The server\'s modpack on Thunderstore (for people using a mod manager).',
+    'Pagina pe Thunderstore': 'Thunderstore page', 'Publicat': 'Published', 'Construit local': 'Built locally', 'Moduri în pachet': 'Mods in the pack', 'Față de profilul tău': 'Compared to your profile',
+    'Construiește și publică': 'Build and publish', 'Doar construiește zip-ul': 'Just build the zip', 'Arată zip-ul': 'Show the zip',
+    'Modpack-ul are exact modurile și versiunile din profilul tău.': 'The modpack has exactly the mods and versions of your profile.',
+    // ---- log ----
+    'Tot ce fac sincronizarea, restarturile și modpack-ul.': 'Everything sync, restarts and the modpack do.', 'Deschide fișierul': 'Open file', 'Nimic încă.': 'Nothing yet.',
+    // ---- settings ----
+    'Serverul acesta': 'This server', 'Numele serverului': 'Server name', 'Așa îl văd prietenii.': 'How friends see it.', 'Lumea': 'World', 'Conexiunea': 'Connection', 'Adrese': 'Addresses',
+    'Pentru tine și pentru statusul Steam, ex.': 'For you and for the Steam status, e.g.', 'Pune modurile pe server după fiecare schimbare.': 'Puts the mods on the server after every change.',
+    'Toate modurile pe server': 'All mods on the server', 'Și cele de client. Pentru prieteni, Server/Client hotărăște ce e obligatoriu și ce e recomandat.': 'Client ones too. For friends, Server/Client decides what is required and what is recommended.',
+    'Sincronizează configurările': 'Sync configs', 'BepInEx/config ↔ server, în ambele sensuri.': 'BepInEx/config ↔ server, both ways.',
+    'Adu modurile puse direct pe server': 'Bring back mods put on the server by hand', 'Ce găsesc pe server și nu e în profil îl aduc la tine și îl gestionez eu.': 'What I find on the server and is not in the profile I bring to you and manage.',
+    'Reîncearcă restartul la': 'Retry the restart every', 'Minute, cât timp sunt jucători pe server.': 'Minutes, while players are on the server.',
+    'Publică lista automat': 'Publish the list automatically', 'După fiecare sincronizare și la join code nou.': 'After every sync and on a new join code.',
+    'Pune și IP-ul în listă': 'Put the IP in the list too', 'Lista e un link pe care îl dai prietenilor; fără IP intră cu join code-ul.': 'The list is a link you give friends; without the IP they join by code.',
+    'Invitație': 'Invite', 'Cod de profil Thunderstore': 'Thunderstore profile code', 'Generează cod': 'Generate code',
+    'Pentru cine folosește r2modman / Thunderstore Mod Manager: aceleași moduri, fără update automat.': 'For people using r2modman / Thunderstore Mod Manager: the same mods, without auto-update.',
+    'Șterge serverul din Bifrost': 'Remove the server from Bifrost', 'Scoate profilul lui de pe PC-ul tău. Serverul în sine nu e atins.': 'Removes its profile from your PC. The server itself is not touched.',
+    'Conturi': 'Accounts', 'GitHub': 'GitHub', 'Pentru publicarea listei (un Gist privat pe contul tău).': 'To publish the list (a secret Gist on your account).',
+    'Cheia personală:': 'Personal key:', '. Cont gratuit: un click pe „Slow download” per fișier; Premium: automat. Salvată criptat.': '. Free account: one click on "Slow download" per file; Premium: automatic. Stored encrypted.',
+    'cheia API Nexus': 'Nexus API key', 'Nicio cheie salvată.': 'No key saved.', 'Joc': 'Game', 'Folderul Valheim': 'Valheim folder', 'Găsit automat prin Steam. Completează doar dacă nu e găsit.': 'Found through Steam. Fill in only if it is not found.',
+    'Încărcătorul de moduri': 'Mod loader', 'Restaurează anteriorul': 'Restore the previous one',
+    'Bifrost pune lângă valheim.exe încărcătorul BepInEx care citește profilul serverului ales. Ce era acolo înainte e păstrat și se poate pune înapoi.': 'Bifrost puts the BepInEx loader next to valheim.exe, pointing at the chosen server\'s profile. What was there before is kept and can be put back.',
+    'Modpack Thunderstore (opțional)': 'Thunderstore modpack (optional)', 'Echipa': 'Team', 'Numele pachetului': 'Package name', 'Niciun token salvat.': 'No token saved.',
+    'Un pachet pe Thunderstore cu modurile serverului, pentru cine nu folosește Bifrost. Tokenul: thunderstore.io → Settings → Teams → echipa ta → Service Accounts.': 'A Thunderstore package with the server\'s mods, for people without Bifrost. Token: thunderstore.io → Settings → Teams → your team → Service Accounts.',
+    'General': 'General', 'Limba': 'Language', 'Pornește cu Windows': 'Start with Windows', 'Stă în tray, fără fereastră.': 'Stays in the tray, without a window.', 'Notificări': 'Notifications',
+    'Update-uri, join code nou, erori.': 'Updates, new join code, errors.', 'Folderul aplicației': 'App folder', 'Profilul de moduri': 'Mod profile', 'Caută update': 'Check for update', 'Închide complet': 'Quit',
+    // ---- wizard ----
+    'Profil personal ': 'Personal profile', 'Importă moduri în profil': 'Import mods into the profile', 'Conexiunea la server': 'Server connection',
+    'Lumea (opțional)': 'World (optional)', 'Unde rulează serverul': 'Where the server runs', 'Linux prin SSH, în Docker (imaginea valheim-server)': 'Linux over SSH, in Docker (valheim-server image)',
+    'Linux prin SSH, foldere obișnuite': 'Linux over SSH, plain folders', 'Pe acest PC': 'On this PC', 'FTP / FTPS (server închiriat)': 'FTP / FTPS (rented server)',
+    'Fără conexiune - doar lista pentru prieteni': 'No connection - just the list for friends', 'Cu cheie SSH, fără parolă (': 'With an SSH key, no password (', '). Testează mai jos.': '). Test below.',
+    'Containerul': 'Container', 'Host FTP': 'FTP host', 'Utilizator': 'User', 'Parolă': 'Password', 'Folderul de pluginuri': 'Plugins folder', 'Folderul de configurări': 'Config folder',
+    'Comandă de restart (opțional)': 'Restart command (optional)', 'Testează conexiunea': 'Test connection', 'Modurile': 'Mods', 'Ce rulează deja serverul': 'What the server already runs',
+    'Citesc pluginurile de pe server și le iau din Thunderstore; restul vin ca moduri manuale.': 'I read the server\'s plugins and take them from Thunderstore; the rest come as manual mods.',
+    'Dintr-un alt mod manager de pe PC': 'From another mod manager on this PC', 'Thunderstore Mod Manager / r2modman, cu configurările lui.': 'Thunderstore Mod Manager / r2modman, with its configs.',
+    'Codul „Export profile as code” din r2modman / TMM.': 'The "Export profile as code" code from r2modman / TMM.', 'Gol': 'Empty', 'Doar BepInEx; adaugi tu din Descoperă.': 'Just BepInEx; you add the rest from Discover.',
+    'ex. Valhalla cu prietenii': 'e.g. Valhalla with friends', 'ex. sudo systemctl restart valheim': 'e.g. sudo systemctl restart valheim', 'testez...': 'testing...', '(niciun profil găsit)': '(no profile found)',
+    'Conectare la GitHub': 'Connect to GitHub', 'Token GitHub': 'GitHub token', 'Adaugă server': 'Add server',
+    'Lipește linkul sau codul de invitație primit de la adminul serverului.': 'Paste the invite link or code you got from the server\'s admin.',
+    // ---- toasts / dialogs ----
+    'Salvat.': 'Saved.', 'Copiat': 'Copied', 'Citesc lista serverului...': 'Reading the server list...', 'Serverul era deja adăugat - l-am deschis.': 'That server was already added - opened it.',
+    'Dezinstalat.': 'Uninstalled.', 'Dezinstalat - sincronizez serverul.': 'Uninstalled - syncing the server.', 'Dezinstalezi?': 'Uninstall?', 'Restart server?': 'Restart the server?',
+    'Join code nou?': 'New join code?', 'Publici modpack-ul?': 'Publish the modpack?', 'Închizi complet?': 'Quit completely?', 'Bifrost se închide.': 'Bifrost quits.',
+    'Actualizezi tot?': 'Update everything?', 'Serverul e la zi.': 'The server is up to date.', 'Modurile sunt la zi.': 'Mods are up to date.', 'Pornesc Valheim prin Steam...': 'Starting Valheim through Steam...',
+    'Lista serverului e actualizată.': 'The server list is updated.', 'Lista era deja la zi.': 'The list was already up to date.', 'Lista pentru prieteni e publicată.': 'The list for friends is published.',
+    'Mesajul e copiat - lipește-l pe Discord.': 'Message copied - paste it on Discord.', 'Invitația e copiată.': 'Invite copied.', 'Generez codul...': 'Generating the code...',
+    'Conexiunea e salvată.': 'Connection saved.', 'Import...': 'Importing...', 'Dă-i un nume.': 'Give it a name.', 'Alege un profil.': 'Choose a profile.', 'Lipește codul de profil.': 'Paste the profile code.',
+    'Completează hostul.': 'Fill in the host.', 'Completează folderele de pluginuri și de configurări.': 'Fill in the plugins and config folders.', 'Creez profilul...': 'Creating the profile...',
+    'Creez serverul și import modurile...': 'Creating the server and importing mods...', 'Deconectat de la GitHub.': 'Disconnected from GitHub.', 'Cheia Nexus ștearsă.': 'Nexus key removed.',
+    'Token șters.': 'Token removed.', 'Catalog actualizat.': 'Catalog updated.', 'Legătură scoasă.': 'Link removed.', 'Serverul nu are încă o listă publicată.': 'The server has no published list yet.',
+    'Lista nu e publicată încă.': 'The list is not published yet.', 'lista nu e publicată încă': 'the list is not published yet', 'fără conexiune - doar lista': 'no connection - list only',
+    'Toate modurile sunt la ultima versiune.': 'All mods are at the latest version.', 'Totul e la zi.': 'Everything is up to date.', 'Bifrost 1.1': 'Bifrost 1.1',
+    // ---- main process ----
+    'Deschide Bifrost': 'Open Bifrost', 'Copiază join code': 'Copy join code', 'Ieșire': 'Quit', 'Instalat de pe Nexus': 'Installed from Nexus', 'Moduri aduse de pe server': 'Mods brought from the server',
+    'Moduri copiate pe server': 'Mods copied to the server', 'Serverul Valheim e actualizat': 'The Valheim server is updated', 'Bifrost: sincronizare oprită': 'Bifrost: sync stopped',
+    'Bifrost: sincronizarea a eșuat': 'Bifrost: sync failed', 'Lucrez deja.': 'Already working.', 'Adaugă sau creează întâi un server.': 'Add or create a server first.',
+    'Pune întâi cheia ta Nexus în Setări → Nexus Mods.': 'Put your Nexus key in Settings → Accounts first.', 'Nu găsesc pachetul în catalog.': 'Package not found in the catalog.',
+    'Serverul are nevoie de el.': 'The server needs it.', 'BepInEx e baza tuturor modurilor - nu se scoate.': 'BepInEx is the base of every mod - it stays.',
+    'Pe pagina Nexus care s-a deschis apasă „Slow download” - Bifrost îl instalează singur.': 'On the Nexus page that opened press "Slow download" - Bifrost installs it by itself.',
+    'Nu găsesc Valheim (Steam). Alege folderul jocului în Setări.': 'Valheim not found (Steam). Choose the game folder in Settings.',
+  };
+  const PATTERNS = [
+    [/^de (.+)$/, 'by $1'], [/^v(\S+) · Nexus (\d+)$/, 'v$1 · Nexus $2'],
+    [/^Profilul Bifrost · (\d+) pachete$/, 'Bifrost profile · $1 packages'],
+    [/^Profilul (.+) · (\d+) moduri · (\d+) pe server$/, '$1 profile · $2 mods · $3 on server'],
+    [/^Profilul Bifrost · (\d+) moduri · (\d+) pe server$/, 'Bifrost profile · $1 mods · $2 on server'],
+    [/^pornit de (\d+) h (\d+) min$/, 'up for $1 h $2 min'], [/^pornit de (\d+) min$/, 'up for $1 min'],
+    [/^acum câteva secunde$/, 'a few seconds ago'], [/^acum (\d+) min$/, '$1 min ago'], [/^acum (\d+) h (\d+) min$/, '$1 h $2 min ago'], [/^acum (\d+) zile$/, '$1 days ago'],
+    [/^ultima verificare (.+)$/, 'last check $1'], [/^publicată (.+)$/, 'published $1'], [/^lista actualizată (.+)$/, 'list updated $1'], [/^a început (.+)$/, 'started $1'],
+    [/^Toate cele (\d+) moduri ale serverului sunt instalate$/, 'All $1 server mods are installed'], [/^(\d+) pachete în profil$/, '$1 packages in the profile'],
+    [/^(\d+) moduri de instalat \/ actualizat$/, '$1 mods to install / update'], [/^întâi: (\d+) de instalat(.*)$/, 'first: $1 to install$2'],
+    [/^Catalogul Thunderstore pentru Valheim · (.+) moduri · actualizat (.+)$/, 'The Thunderstore catalog for Valheim · $1 mods · updated $2'],
+    [/^Nexus Mods pentru Valheim · (.+) moduri$/, 'Nexus Mods for Valheim · $1 mods'],
+    [/^(\d+) din (.+) - derulează pentru mai multe$/, '$1 of $2 - scroll for more'], [/^(\d+) moduri$/, '$1 mods'],
+    [/^Actualizează tot \((\d+)\)$/, 'Update all ($1)'], [/^Update la (.+)$/, 'Update to $1'], [/^update (.+) ↻$/, 'update $1 ↻'],
+    [/^Serverul acesta: (.+)$/, 'This server: $1'], [/^Sincronizare \((.+)\)$/, 'Sync ($1)'], [/^Instalez (.+)\.\.\.$/, 'Installing $1...'], [/^Instalez (.+)$/, 'Installing $1'],
+    [/^Configurări la zi$/, 'Configs up to date'], [/^Configurări sincronizate \(↑ (\d+) trimise, ↓ (\d+) aduse\)$/, 'Configs synced (↑ $1 sent, ↓ $2 pulled)'], [/^aduse de pe server: (.+)$/, 'brought from the server: $1'],
+    [/^Server adăugat: (.+) \((\d+) moduri\)\. Apasă JOACĂ\.$/, 'Server added: $1 ($2 mods). Press PLAY.'], [/^Gata: (\d+) pachete în profil\.(.*)$/, 'Done: $1 packages in the profile.$2'],
+    [/^Import gata: (\d+) pachete\.$/, 'Import done: $1 packages.'], [/^Conectat la GitHub ca (.+)\.$/, 'Connected to GitHub as $1.'], [/^Conectat la Nexus ca (.+)$/, 'Connected to Nexus as $1'],
+    [/^Copiat: (.+)$/, 'Copied: $1'], [/^Join code copiat: (.+)$/, 'Join code copied: $1'], [/^(.+) instalat\.$/, '$1 installed.'], [/^(.+) instalat\. Pornește-l cu JOACĂ\.$/, '$1 installed. Start it with PLAY.'],
+    [/^Server repornit\. Join code: (.+)$/, 'Server restarted. Join code: $1'], [/^(\d+) moduri actualizate - sincronizez serverul\.$/, '$1 mods updated - syncing the server.'],
+    [/^Ștergi „(.+)” din Bifrost\?$/, 'Remove "$1" from Bifrost?'], [/^Versiunea (.+) e gata - repornește Bifrost ca s-o folosești\.$/, 'Version $1 is ready - restart Bifrost to use it.'],
+    [/^Bifrost (\S+) · (\d+) servere$/, 'Bifrost $1 · $2 servers'], [/^Bifrost (\S+) \(din sursă\) · (\d+) servere$/, 'Bifrost $1 (from source) · $2 servers'],
+  ];
+  const norm = s => s.replace(/\s+/g, ' ').trim();
+  function t(s) {
+    if (!s) return s;
+    const k = norm(s);
+    if (!k) return s;
+    const lead = s.match(/^\s*/)[0], trail = s.match(/\s*$/)[0];
+    if (EN[k] !== undefined) return lead + EN[k] + trail;
+    for (const [re, rep] of PATTERNS) if (re.test(k)) return lead + k.replace(re, rep) + trail;
+    // "a · b · c": each part on its own
+    if (k.includes(' · ')) { const out = k.split(' · ').map(p => t(p)).join(' · '); if (out !== k) return lead + out + trail; }
+    return s;
+  }
+  const api = { EN, t };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.bifrostI18n = api;
+})(typeof window !== 'undefined' ? window : globalThis);

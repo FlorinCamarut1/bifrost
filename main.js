@@ -1,88 +1,166 @@
-// Bifrost - Valheim mod manager + server companion.
-//   admin mode : watches the admin's Thunderstore Mod Manager profile, pushes server mods with sync-valheim-mods.ps1
-//                -Auto, shows the server status over SSH, publishes the server's mod list (GitHub) and the modpack.
-//   player mode: reads that list, installs exactly those mods into its own profile (Thunderstore + Nexus) and
-//                starts Valheim with them.
-const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, shell, nativeImage, safeStorage, clipboard, protocol, net } = require('electron');
+// Bifrost - Valheim mod manager for playing on modded servers with friends.
+// Every server is its own entry with its own mod profile:
+//   player: reads the server's list (server.json: Gist / GitHub / URL), installs exactly those mods, starts Valheim.
+//   admin : manages the mods in Bifrost, syncs them + configs to the server (SSH+Docker / SSH / local / FTP),
+//           restarts it when nobody plays, publishes the list and hands out invite links.
+const { app } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const OWN_VERSION = require('./package.json').version;
+
+// ---------- code updates: an installed build hands over to a newer app.asar (lib/codeupdate.js) ----------
+if (app.isPackaged && !global.__bifrostInner) {
+  const target = require('./lib/codeupdate').pick(app.getPath('appData'), OWN_VERSION, +process.versions.electron.split('.')[0]);
+  if (target && path.resolve(target.dir, 'app.asar') !== path.resolve(__dirname)) {
+    global.__bifrostInner = true;
+    require(path.join(target.dir, 'app.asar', 'main.js'));
+    return;
+  }
+}
+
+const { BrowserWindow, Tray, Menu, ipcMain, Notification, shell, nativeImage, safeStorage, clipboard, protocol, net, dialog } = require('electron');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
-const yaml = require('js-yaml');
 const { Profile, BEPINEX, cmpVer, parseDep } = require('./lib/profile');
 const { Nexus } = require('./lib/nexus');
-const serverList = require('./lib/manifest');
-const { ServerSync } = require('./lib/serversync');
+const { build: buildServerList } = require('./lib/manifest');
+const listhost = require('./lib/listhost');
+const { makeTransport, walk } = require('./lib/transport');
+const { syncMods } = require('./lib/modsync');
+const { syncConfigs } = require('./lib/serversync');
+const a2s = require('./lib/a2s');
+const tsprofile = require('./lib/tsprofile');
+const importers = require('./lib/importers');
+const codeupdate = require('./lib/codeupdate');
+const { run7z } = require('./lib/archive');
 
 const APP_ID = 'io.github.florincamarut1.bifrost';
-const REPO_DEFAULT = 'FlorinCamarut1/bifrost';
+const REPO = 'FlorinCamarut1/bifrost';
+const JOIN_PAGE = 'https://florincamarut1.github.io/bifrost/join.html';
+// GitHub OAuth App (device flow) used for "Log in with GitHub"; without it Bifrost falls back to the GitHub CLI or
+// a pasted token
+const GITHUB_CLIENT_ID = process.env.BIFROST_GITHUB_CLIENT_ID || '';
 const ICON = path.join(__dirname, 'ui', 'app.png');
-const BUILTIN = /ValheimPlus|BepInExPack/i;                       // provided by the server image itself
 const TS = 'https://thunderstore.io';
-const DEV_ADMIN_ROOT = path.resolve(__dirname, '..');             // ...\valheim when run from the source folder
+const ELECTRON_MAJOR = +process.versions.electron.split('.')[0];
+const fetchN = (...a) => net.fetch(...a);
 
 app.setAppUserModelId(APP_ID);
-// --data=<dir>: a separate Bifrost (own settings + profile), e.g. to try player mode next to the admin one
+// --data=<dir>: a separate Bifrost (own settings + profiles), for tests
 const dataArg = process.argv.find(a => a.startsWith('--data='));
 if (dataArg) app.setPath('userData', path.resolve(dataArg.slice(7)));
-const nxmArg = argv => argv.find(a => /^nxm:\/\//i.test(a));
+const linkArg = argv => argv.find(a => /^(nxm|bifrost):\/\//i.test(a));
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 protocol.registerSchemesAsPrivileged([{ scheme: 'modicon', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
-// ---------- settings (+ migration from "Valheim Panel") ----------
+// =====================================================================================================
+// SETTINGS: global + one entry per server
+// =====================================================================================================
 const DATA = app.getPath('userData');                              // %APPDATA%\Bifrost
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
 const readJson = (f, def) => { try { return JSON.parse(fs.readFileSync(f, 'utf8').replace(/^﻿/, '')); } catch { return def; } };
-const OLD_DATA = path.join(app.getPath('appData'), 'Valheim Panel');
-let migrated = false;
-if (!dataArg && !fs.existsSync(SETTINGS_FILE) && fs.existsSync(path.join(OLD_DATA, 'settings.json'))) {
-  fs.mkdirSync(DATA, { recursive: true });
-  for (const f of ['settings.json', 'catalog.json']) { try { fs.copyFileSync(path.join(OLD_DATA, f), path.join(DATA, f)); } catch { } }
-  migrated = true;
-}
-const DEFAULTS = {
-  role: null, adminFolder: null, adminSource: 'tmm', syncConfigs: true, syncAllMods: true, pullServerMods: true,
-  autoSync: true, startWithWindows: null, notifications: true, quietSeconds: 45, retryMinutes: 5,
-  server: '', container: 'valheim', profile: 'Default', tokenEnc: null,
-  manifestRepo: REPO_DEFAULT, autoPublish: true, publishAddress: false, serverName: 'Server', serverWorld: '', addresses: '',
-  modpackTeam: '', modpackName: '', nexusLinks: {},
-  nexusKeyEnc: null, nexusUser: null, gameDir: null, recommended: {}, nexusChosen: {}, shortcutsV2: false,
+const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 2)); fs.renameSync(f + '.tmp', f); };
+const slug = s => String(s || 'server').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'server';
+
+const GLOBAL_DEFAULTS = {
+  lang: null, notifications: true, startWithWindows: null, gameDir: null, shortcutsV2: false,
+  nexusKeyEnc: null, nexusUser: null, githubTokenEnc: null, githubUser: null, activeServer: null, servers: [],
 };
-let settings = { ...DEFAULTS, ...readJson(SETTINGS_FILE, {}) };
-const saveSettings = () => { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2)); };
-if (settings.role === null) {
-  // the old Valheim Panel was the admin's tool; a fresh install is a player
-  if (migrated && fs.existsSync(path.join(DEV_ADMIN_ROOT, 'sync-valheim-mods.ps1'))) {
-    Object.assign(settings, { role: 'admin', adminFolder: DEV_ADMIN_ROOT });
-  } else settings.role = 'player';
+const SERVER_DEFAULTS = {
+  id: '', name: 'Server', role: 'player', list: null, profileDir: null, createdAt: 0,
+  // admin
+  conn: null, connSecretEnc: null, world: '', addresses: '', builtin: 'BepInExPack',
+  autoSync: true, quietSeconds: 8, retryMinutes: 5, syncConfigs: true, syncAllMods: true, pullServerMods: true,
+  autoPublish: true, publishAddress: false, modpackTeam: '', modpackName: '', tsTokenEnc: null, nexusLinks: {},
+  // player
+  recommended: {}, nexusChosen: {},
+};
+let G = { ...GLOBAL_DEFAULTS, ...readJson(SETTINGS_FILE, {}) };
+const serverDir = id => path.join(DATA, 'servers', id);
+
+// before 1.1 there was one server, with its settings at the top level
+function migrateFlat() {
+  if (Array.isArray(G.servers) && G.servers.length) return;
+  const raw = readJson(SETTINGS_FILE, null);
+  if (!raw || !raw.role) { G.servers = []; return; }
+  const cached = readJson(path.join(DATA, 'server-list.json'), null);
+  const name = raw.serverName && raw.serverName !== 'Server' ? raw.serverName : cached?.server?.name || 'Server';
+  const id = slug(name);
+  const s = {
+    ...SERVER_DEFAULTS, id, name, role: raw.role === 'admin' ? 'admin' : 'player', createdAt: Date.now(),
+    list: { kind: 'github', repo: raw.manifestRepo || REPO, path: 'server.json' }, profileDir: path.join(DATA, 'profile'),
+    recommended: raw.recommended || {}, nexusChosen: raw.nexusChosen || {},
+  };
+  if (s.role === 'admin') {
+    Object.assign(s, {
+      conn: raw.server ? { type: 'ssh-docker', host: raw.server, container: raw.container || 'valheim' } : null,
+      builtin: 'ValheimPlus|BepInExPack', world: raw.serverWorld || '', addresses: raw.addresses || '',
+      autoSync: raw.autoSync !== false, syncConfigs: raw.syncConfigs !== false, syncAllMods: raw.syncAllMods !== false,
+      pullServerMods: raw.pullServerMods !== false, autoPublish: raw.autoPublish !== false, publishAddress: !!raw.publishAddress,
+      retryMinutes: raw.retryMinutes || 5, modpackTeam: raw.modpackTeam || '', modpackName: raw.modpackName || '',
+      tsTokenEnc: raw.tokenEnc || null, nexusLinks: raw.nexusLinks || {},
+    });
+    // the sync state lived next to the old PowerShell script
+    const old = raw.adminFolder && readJson(path.join(raw.adminFolder, 'mods.json'), null);
+    if (old) writeJson(path.join(serverDir(id), 'state.json'), { mods: old.mods || {}, installed: Array.isArray(old.installed) ? old.installed : [], restartPending: !!old.restartPending, uploaded: {} });
+  }
+  for (const [from, to] of [['config-sync.json', 'config-sync.json'], ['server-list.json', 'list-cache.json']]) {
+    try { if (fs.existsSync(path.join(DATA, from))) { fs.mkdirSync(serverDir(id), { recursive: true }); fs.renameSync(path.join(DATA, from), path.join(serverDir(id), to)); } } catch { }
+  }
+  G = {
+    ...GLOBAL_DEFAULTS, lang: raw.lang || null, notifications: raw.notifications !== false, startWithWindows: raw.startWithWindows ?? null,
+    gameDir: raw.gameDir || null, shortcutsV2: !!raw.shortcutsV2, nexusKeyEnc: raw.nexusKeyEnc || null, nexusUser: raw.nexusUser || null,
+    activeServer: id, servers: [s],
+  };
 }
-if (settings.startWithWindows === null) settings.startWithWindows = settings.role === 'admin';
+migrateFlat();
+G.servers = G.servers.map(s => ({ ...SERVER_DEFAULTS, ...s }));
+if (!G.servers.find(s => s.id === G.activeServer)) G.activeServer = G.servers[0]?.id || null;
+if (G.startWithWindows === null) G.startWithWindows = G.servers.some(s => s.role === 'admin');
+const saveSettings = () => writeJson(SETTINGS_FILE, G);
 saveSettings();
 
-const adminRoot = () => settings.adminFolder && fs.existsSync(path.join(settings.adminFolder, 'sync-valheim-mods.ps1')) ? settings.adminFolder : null;
-const isAdmin = () => settings.role === 'admin' && !!adminRoot();
-const SYNC = () => path.join(adminRoot(), 'sync-valheim-mods.ps1');
-const STATE_FILE = () => path.join(adminRoot(), 'mods.json');
-const MODPACK_DIR = () => path.join(adminRoot(), 'modpack');
-const LOG_FILE = path.join(DATA, 'bifrost.log');
+const srv = () => G.servers.find(s => s.id === G.activeServer) || null;
+const isAdmin = () => srv()?.role === 'admin';
 const enc = s => safeStorage.encryptString(String(s).trim()).toString('base64');
 const dec = s => { try { return s ? safeStorage.decryptString(Buffer.from(s, 'base64')) : null; } catch { return null; } };
+const LOG_FILE = path.join(DATA, 'bifrost.log');
+// English is the default; the texts are written in Romanian and translated on the way out (ui/i18n.js)
+const i18n = require('./ui/i18n.js');
+const tr = s => (G.lang || 'en') === 'en' ? i18n.t(s) : s;
+
+function publicServer(s) {
+  if (!s) return null;
+  const { connSecretEnc, tsTokenEnc, ...rest } = s;
+  return { ...rest, hasConnSecret: !!connSecretEnc, hasToken: !!tsTokenEnc, invite: s.list ? listhost.inviteCode(s.list) : null, inviteLink: s.list ? listhost.inviteLink(s.list, JOIN_PAGE) : null };
+}
 const publicSettings = () => {
-  const { tokenEnc, nexusKeyEnc, ...s } = settings;
-  return { ...s, hasToken: !!tokenEnc, hasNexusKey: !!nexusKeyEnc, isAdmin: isAdmin(), ownSource: ownSource(), adminRootOk: !!adminRoot(), packaged: app.isPackaged };
+  const { nexusKeyEnc, githubTokenEnc, servers, ...g } = G;
+  const s = srv();
+  return {
+    ...g, lang: G.lang || 'en', hasNexusKey: !!nexusKeyEnc, hasGithubToken: !!githubTokenEnc, githubLogin: !!GITHUB_CLIENT_ID,
+    servers: servers.map(x => ({ id: x.id, name: x.name, role: x.role })), server: publicServer(s),
+    isAdmin: isAdmin(), ownSource: isAdmin(), packaged: app.isPackaged, version: OWN_VERSION,
+    // flat aliases the UI reads
+    ...(s ? { role: s.role, serverName: s.name, serverWorld: s.world, addresses: s.addresses, autoSync: s.autoSync, quietSeconds: s.quietSeconds,
+      retryMinutes: s.retryMinutes, syncConfigs: s.syncConfigs, syncAllMods: s.syncAllMods, pullServerMods: s.pullServerMods,
+      autoPublish: s.autoPublish, publishAddress: s.publishAddress, hasToken: !!s.tsTokenEnc } : {}),
+  };
 };
 
-// ---------- window / tray / events ----------
+// =====================================================================================================
+// WINDOW / TRAY / LOG
+// =====================================================================================================
 let win = null, tray = null, quitting = false;
 const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send('event', ch, data); };
 function notify(title, body, kind) {
-  if (!settings.notifications || !Notification.isSupported()) return;
-  const n = new Notification({ title, body, icon: ICON, silent: kind !== 'warn' });
+  if (!G.notifications || !Notification.isSupported()) return;
+  const n = new Notification({ title: tr(title), body: String(body || '').split('\n').map(tr).join('\n'), icon: ICON, silent: kind !== 'warn' });
   n.on('click', showWindow);
   n.show();
 }
-function toast(text, kind = 'info') { send('toast', { text, kind }); }
+const toast = (text, kind = 'info') => send('toast', { text: tr(text), kind });
 function showWindow() {
   if (!win || win.isDestroyed()) createWindow(true);
   else { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
@@ -97,52 +175,50 @@ function createWindow(show) {
   });
   win.removeMenu();
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
-  // test screenshots render off-screen, without taking focus
   win.once('ready-to-show', () => { if (shotMode) win.showInactive(); else if (show) win.show(); });
-  // test hook: --shot=<dir> [--pages=a,b] saves a screenshot of every page once the data is in
+  // test hook: --shot=<dir> --pages=a,b saves a screenshot of every page once the data is in
   const shot = (process.argv.find(a => a.startsWith('--shot=')) || '').slice(7);
   if (shot) win.webContents.once('did-finish-load', () => setTimeout(async () => {
-    const pages = ((process.argv.find(a => a.startsWith('--pages=')) || '').slice(8) || 'home,server,mods,pmods,browse,modpack,log,settings').split(',');
+    const pages = ((process.argv.find(a => a.startsWith('--pages=')) || '').slice(8) || 'home,server,mods,browse,settings').split(',');
     for (const p of pages) {
       if (p.startsWith('drawer:')) await win.webContents.executeJavaScript(`openDrawer(${JSON.stringify(p.slice(7))})`);
       else if (p === 'nexus') await win.webContents.executeJavaScript("closeDrawer(); go('browse'); setSource('nx')");
-      else if (p.startsWith('nxdrawer:')) await win.webContents.executeJavaScript(`openNexusDrawer(${+p.slice(9)})`);
+      else if (p.startsWith('js:')) await win.webContents.executeJavaScript(decodeURIComponent(p.slice(3)));
       else await win.webContents.executeJavaScript(`closeDrawer(); go(${JSON.stringify(p)})`);
-      await new Promise(r => setTimeout(r, p === 'browse' || p === 'nexus' ? 8000 : /drawer:/.test(p) ? 4000 : 900));
-      fs.writeFileSync(path.join(shot, `${p.replace(/[:]/g, '-')}.png`), (await win.webContents.capturePage()).toPNG());
+      await new Promise(r => setTimeout(r, p === 'browse' || p === 'nexus' ? 8000 : /drawer:/.test(p) ? 4000 : 1200));
+      fs.writeFileSync(path.join(shot, `${p.replace(/[^\w-]+/g, '_').slice(0, 40)}.png`), (await win.webContents.capturePage()).toPNG());
     }
-  }, 12000));
+  }, 10000));
   win.on('close', e => {
     if (quitting) return;
-    // the admin keeps it running in the tray (auto-sync); a player who closes it is done
-    if (isAdmin() || settings.startWithWindows) { e.preventDefault(); win.hide(); } else quitting = true;
+    // admins keep it in the tray (auto-sync); a player who closes it is done
+    if (G.servers.some(s => s.role === 'admin') || G.startWithWindows) { e.preventDefault(); win.hide(); } else quitting = true;
   });
-  win.on('show', () => { if (isAdmin()) pollStatus(); });
+  win.on('show', () => pollStatus());
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', e => e.preventDefault());
 }
 function updateTray() {
   if (!tray) return;
-  let lines = ['Bifrost'];
-  if (isAdmin()) {
-    const s = status;
-    lines.push(s.reachable === false ? 'server: fără conexiune' : s.container !== 'running' ? `server: ${s.container || '...'}` :
-      s.joinCode ? `join code ${s.joinCode} - ${s.players ?? 0} online` : 'serverul pornește...', watch.text);
-  } else if (manifest) lines.push(settings.serverName === 'Server' ? manifest.server?.name || '' : '');
-  tray.setToolTip(lines.filter(Boolean).join('\n').slice(0, 127));
+  const s = srv(), lines = ['Bifrost'];
+  if (s) lines.push(s.name);
+  if (status.joinCode) lines.push(`join code ${status.joinCode}${status.players != null ? ` - ${status.players} online` : ''}`);
+  if (isAdmin() && watch.text) lines.push(watch.text);
+  tray.setToolTip(lines.join('\n').slice(0, 127));
 }
 function createTray() {
   tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }));
-  const items = isAdmin()
-    ? [{ label: 'Deschide Bifrost', click: showWindow }, { label: 'Sincronizează acum', click: () => syncNow('manual') },
-    { label: 'Copiază join code', click: () => { if (status.joinCode) clipboard.writeText(status.joinCode); } }]
-    : [{ label: 'Deschide Bifrost', click: showWindow }, { label: 'Joacă', click: () => playerSync({ launch: true }) }];
-  tray.setContextMenu(Menu.buildFromTemplate([...items, { type: 'separator' }, { label: 'Ieșire', click: () => { quitting = true; app.quit(); } }]));
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: tr('Deschide Bifrost'), click: showWindow },
+    { label: tr('Joacă'), click: () => playerSync({ launch: true }) },
+    { label: tr('Copiază join code'), click: () => { if (status.joinCode) clipboard.writeText(status.joinCode); } },
+    { type: 'separator' },
+    { label: tr('Ieșire'), click: () => { quitting = true; app.quit(); } },
+  ]));
   tray.on('click', showWindow);
   updateTray();
 }
 
-// ---------- shortcuts / autostart ----------
 const devShortcut = extraArgs => ({
   target: process.execPath, args: `"${__dirname}"${extraArgs ? ' ' + extraArgs : ''}`, cwd: __dirname,
   icon: path.join(__dirname, 'ui', 'app.ico'), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Valheim',
@@ -150,25 +226,25 @@ const devShortcut = extraArgs => ({
 const startMenu = () => path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs');
 function applyStartup() {
   try {
-    if (app.isPackaged) { app.setLoginItemSettings({ openAtLogin: !!settings.startWithWindows, args: ['--hidden'] }); return; }
+    if (app.isPackaged) { app.setLoginItemSettings({ openAtLogin: !!G.startWithWindows, args: ['--hidden'] }); return; }
     const lnk = path.join(startMenu(), 'Startup', 'Bifrost.lnk');
-    if (settings.startWithWindows) shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? 'replace' : 'create', devShortcut('--hidden'));
+    if (G.startWithWindows) shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? 'replace' : 'create', devShortcut('--hidden'));
     else if (fs.existsSync(lnk)) fs.unlinkSync(lnk);
   } catch (e) { log(`autostart: ${e.message}`); }
 }
 function devShortcuts() {
-  // running from the source folder: our own Start menu + Desktop shortcuts (the Start menu one carries the
-  // AppUserModelID Windows needs for notifications). The installer makes them for the packaged app.
-  for (const old of [path.join(startMenu(), 'Valheim Panel.lnk'), path.join(app.getPath('desktop'), 'Valheim Panel.lnk'), path.join(startMenu(), 'Startup', 'Valheim Panel.lnk')]) {
-    try { if (fs.existsSync(old)) fs.unlinkSync(old); } catch { }
-  }
   for (const l of [path.join(startMenu(), 'Bifrost.lnk'), path.join(app.getPath('desktop'), 'Bifrost.lnk')]) {
     try { shell.writeShortcutLink(l, fs.existsSync(l) ? 'replace' : 'create', devShortcut('')); } catch (e) { log(`shortcut ${l}: ${e.message}`); }
   }
-  settings.shortcutsV2 = true; saveSettings();
+  G.shortcutsV2 = true; saveSettings();
+}
+function registerProtocols() {
+  for (const p of ['bifrost', ...(G.nexusKeyEnc ? ['nxm'] : [])]) {
+    try { if (app.isPackaged) app.setAsDefaultProtocolClient(p); else app.setAsDefaultProtocolClient(p, process.execPath, [path.resolve(__dirname)]); }
+    catch (e) { log(`${p}://: ${e.message}`); }
+  }
 }
 
-// ---------- log ----------
 const logTail = [];
 function log(line, kind = 'info') {
   const t = new Date();
@@ -180,399 +256,48 @@ function log(line, kind = 'info') {
 try { if (fs.statSync(LOG_FILE).size > 2e6) fs.writeFileSync(LOG_FILE, fs.readFileSync(LOG_FILE, 'utf8').split('\n').slice(-5000).join('\n')); } catch { }
 
 // =====================================================================================================
-// ADMIN
+// PROFILE + JOBS (shared)
 // =====================================================================================================
-const tmmProfileDir = () => path.join(app.getPath('appData'), 'Thunderstore Mod Manager', 'DataFolder', 'Valheim', 'profiles', settings.profile);
-const tmmPluginsDir = () => path.join(tmmProfileDir(), 'BepInEx', 'plugins');
-// the admin's mods live in Bifrost's own profile (after the one-time import from Thunderstore Mod Manager)
-const ownSource = () => isAdmin() && settings.adminSource === 'bifrost';
-const pluginsDir = () => ownSource() ? path.join(getProfile().dir, 'BepInEx', 'plugins') : tmmPluginsDir();
-function readState() {
-  const j = adminRoot() ? readJson(STATE_FILE(), {}) : {};
-  return { raw: j, mods: j.mods || {}, installed: Array.isArray(j.installed) ? j.installed : (j.installed ? [j.installed] : []), restartPending: !!j.restartPending };
+let profile = null, profileFor = null;
+function getProfile() {
+  const s = srv();
+  const dir = s?.profileDir || path.join(DATA, 'profiles', s?.id || 'none');
+  if (!profile || profileFor !== dir) { profile = new Profile({ dir, cacheDir: path.join(DATA, 'cache'), fetch: fetchN, log }); profileFor = dir; }
+  return profile;
 }
-function readProfile() { return ownSource() ? ownAdminMods() : readTmmProfile(); }
-function ownAdminMods() {
-  const st = readState(), pr = getProfile();
-  const mods = Object.entries(pr.packages).map(([k, x]) => {
-    const c = catalogIndex.get(k);
-    return {
-      name: k, displayName: (c?.name || x.title || k).replace(/_/g, ' '),
-      author: c?.owner || (x.source === 'nexus' ? 'Nexus' : x.source === 'manual' ? 'instalat manual' : k.split('-')[0]),
-      description: c?.desc || (x.source === 'manual' ? 'Nu e din Thunderstore / Nexus (copiat la import).' : ''), version: x.ver, enabled: true,
-      url: c?.url || (x.modId ? `https://www.nexusmods.com/valheim/mods/${x.modId}` : null), builtin: BUILTIN.test(k),
-      modpack: !!settings.modpackName && k.endsWith(`-${settings.modpackName}`), side: st.mods[k] || null, onServer: st.installed.includes(k),
-      icon: fs.existsSync(path.join(pluginsDir(), k, 'icon.png')) ? `modicon://icon/${encodeURIComponent(k)}` : (c?.icon || null),
-      manual: x.source !== 'thunderstore', role: x.role, source: x.source, size: x.size || 0,
-      nexus: x.source === 'nexus' ? { modId: x.modId, fileId: x.fileId, version: x.ver, title: x.title } : (settings.nexusLinks[k] || null),
-    };
-  });
-  return { mods, restartPending: st.restartPending, profileFound: true, profile: 'Bifrost', source: 'bifrost' };
-}
-function readTmmProfile() {
-  let list = [];
-  try { list = yaml.load(fs.readFileSync(path.join(tmmProfileDir(), 'mods.yml'), 'utf8')) || []; } catch { }
-  const st = readState();
-  const seen = new Set();
-  const iconUrl = n => fs.existsSync(path.join(tmmPluginsDir(), n, 'icon.png')) ? `modicon://icon/${encodeURIComponent(n)}` : null;
-  const mods = list.filter(m => m && m.name).map(m => {
-    seen.add(m.name);
-    const v = m.versionNumber || {};
-    return {
-      name: m.name, displayName: (m.displayName || m.name).replace(/_/g, ' '), author: m.authorName || m.name.split('-')[0],
-      description: (m.description || '').trim(), version: `${v.major ?? 0}.${v.minor ?? 0}.${v.patch ?? 0}`,
-      enabled: m.enabled !== false, url: m.websiteUrl || null, builtin: BUILTIN.test(m.name),
-      modpack: !!settings.modpackName && m.name.endsWith(`-${settings.modpackName}`), side: st.mods[m.name] || null, onServer: st.installed.includes(m.name),
-      icon: iconUrl(m.name), installedAt: m.installedAtTime || 0,
-    };
-  });
-  try {
-    for (const e of fs.readdirSync(tmmPluginsDir(), { withFileTypes: true })) {
-      if (seen.has(e.name) || !(e.isDirectory() || /\.dll$/i.test(e.name))) continue;
-      mods.push({
-        name: e.name, displayName: e.name.replace(/\.dll$/i, ''), author: 'instalat manual', description: 'Nu e din Thunderstore (ex. Nexus).',
-        version: '', enabled: true, manual: true, builtin: BUILTIN.test(e.name), side: st.mods[e.name] || null,
-        onServer: st.installed.includes(e.name), icon: iconUrl(e.name), nexus: settings.nexusLinks[e.name] || null,
-      });
-    }
-  } catch { }
-  return { mods, restartPending: st.restartPending, profileFound: fs.existsSync(tmmProfileDir()), profile: settings.profile, source: 'tmm' };
-}
-let sideTimer = null;
-function setSide(name, side) {
-  if (job) return { ok: false, error: 'O sincronizare rulează acum - încearcă după ce termină.' };
-  const st = readState();
-  st.raw.mods = { ...st.mods, [name]: side };
-  if (!st.raw.installed) st.raw.installed = st.installed;
-  fs.writeFileSync(STATE_FILE(), JSON.stringify(st.raw, null, 2));
-  log(`${name} -> ${side} (marcat în app)`);
-  send('mods', modsPayload());
-  watch.dirty = true; setWatch();
-  if (settings.autoSync) { clearTimeout(sideTimer); sideTimer = setTimeout(() => syncNow('schimbare server/client'), 4000); }
-  return { ok: true };
-}
+const pluginsDir = () => path.join(getProfile().dir, 'BepInEx', 'plugins');
+const configDir = () => path.join(getProfile().dir, 'BepInEx', 'config');
+const statePath = () => path.join(serverDir(srv().id), 'state.json');
+function readState() { const j = srv() ? readJson(statePath(), {}) : {}; return { mods: j.mods || {}, installed: j.installed || [], restartPending: !!j.restartPending, uploaded: j.uploaded || {} }; }
+const writeState = st => writeJson(statePath(), st);
 
-// ---------- jobs (one at a time) ----------
-let job = null;   // { kind, label, started }
+let job = null;
 function setJob(j) { job = j; send('job', job); }
-function runProcess(kind, label, cmd, args, opts = {}) {
-  return new Promise(resolve => {
-    if (job) return resolve({ code: -1, busy: true, lines: [] });
-    setJob({ kind, label, started: Date.now() }); log(`▶ ${label}`, 'start');
-    const lines = [];
-    let p;
-    try { p = spawn(cmd, args, { windowsHide: true, cwd: adminRoot() || DATA, ...opts }); }
-    catch (e) { setJob(null); log(e.message, 'error'); return resolve({ code: 1, lines: [e.message] }); }
-    let buf = '';
-    const onData = d => {
-      buf += d.toString();
-      const parts = buf.split(/\r?\n/); buf = parts.pop();
-      for (const l of parts) { lines.push(l); if (l.trim()) log(`  ${l}`, 'out'); }
-    };
-    p.stdout.on('data', onData); p.stderr.on('data', onData);
-    p.on('error', e => { lines.push(e.message); });
-    p.on('close', code => {
-      if (buf) { lines.push(buf); log(`  ${buf}`, 'out'); }
-      log(`■ ${label}: exit ${code}`, code === 0 ? 'done' : 'error');
-      setJob(null);
-      applyHints();
-      resolve({ code, lines });
-    });
-  });
-}
-const runSync = (kind, label, args) => runProcess(kind, label, 'powershell.exe',
-  ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SYNC(), '-Profile', settings.profile, '-Server', settings.server, '-Container', settings.container,
-    ...(ownSource() ? ['-ClientPlugins', pluginsDir(), '-SkipDoorstop'] : []), ...(ownSource() && settings.syncAllMods ? ['-AllMods'] : []), ...args]);
+let progress = null;
+function setProgress(p) { progress = p; send('progress', progress); }
 
-function summarize(lines) {
-  const strip = s => s.replace(/^\s+(copied|removed)\s+/, '').trim();
-  const r = {
-    copied: lines.filter(l => /^\s+copied /.test(l)).map(strip),
-    removed: lines.filter(l => /^\s+removed /.test(l)).map(strip),
-    newMods: lines.filter(l => /^\s+\S+\s+-> (server|client)/.test(l)).map(l => l.trim().replace(/\s+/g, ' ')),
-    joinCode: (lines.join('\n').match(/Join code: (\d+)/) || [])[1] || null,
-    noCode: lines.some(l => /No join code/.test(l)),
-    toCopy: ((lines.find(l => /^To copy\s+:/.test(l)) || '').split(':')[1] || '').trim(),
-    toRemove: ((lines.find(l => /^To remove\s+:/.test(l)) || '').split(':')[1] || '').trim(),
-    error: lines.filter(l => l.trim()).slice(-3).join(' '),
-  };
-  r.what = [r.copied.length && `Actualizat: ${r.copied.join(', ')}`, r.removed.length && `Scos: ${r.removed.join(', ')}`,
-  r.newMods.length && `Moduri noi (ghicit): ${r.newMods.join('; ')}`].filter(Boolean).join('\n');
-  return r;
-}
-
-// ---------- watcher ----------
-const watch = { text: 'pornește...', state: 'idle', dirty: false, lastSync: null, lastResult: null, retryAt: null };
-let seenSig = null, syncedSig = null, changedAt = null, failStreak = 0;
-function setWatch(state, text) { if (state) watch.state = state; if (text) watch.text = text; send('watch', watch); updateTray(); }
-function signature() {
-  const parts = [];
-  try { const s = fs.statSync(ownSource() ? getProfile().stateFile : path.join(tmmProfileDir(), 'mods.yml')); parts.push(`list|${s.mtimeMs}|${s.size}`); } catch { parts.push('list|none'); }
-  try { for (const e of fs.readdirSync(pluginsDir()).sort()) { try { parts.push(`${e}|${fs.statSync(path.join(pluginsDir(), e)).mtimeMs}`); } catch { } } } catch { }
-  return parts.join('\n');
-}
-async function syncNow(reason) {
-  if (!isAdmin()) return;
-  if (job) { toast('Rulează deja ceva - aștept să termine.'); return; }
-  const manual = reason === 'manual';
-  const sig = signature();
-  changedAt = null; watch.retryAt = null;
-  setWatch('syncing', 'sincronizez...');
-  const { code, lines, busy } = await runSync('sync', `Sincronizare (${reason})`, ['-Auto']);
-  if (busy) return;
-  const r = summarize(lines);
-  watch.lastSync = Date.now();
-  send('mods', modsPayload());
-  if (code === 0 || code === 10 || code === 3) { syncedSig = sig; failStreak = 0; }
-  watch.dirty = signature() !== syncedSig;
-  if (code === 0) {
-    if (r.joinCode) {
-      watch.lastResult = { kind: 'ok', text: `Server actualizat și repornit - join code ${r.joinCode}`, what: r.what };
-      notify('Serverul Valheim e actualizat', `${r.what}\nRepornit - join code ${r.joinCode}`.trim());
-      pollStatus();
-    } else if (r.noCode) {
-      watch.lastResult = { kind: 'ok', text: 'Server actualizat și repornit (fără join code - intră pe IP)', what: r.what };
-      notify('Serverul Valheim e actualizat', `${r.what}\nRepornit, dar fără join code - intră pe IP.`.trim());
-    } else {
-      watch.lastResult = { kind: 'ok', text: 'Serverul e la zi', what: r.what };
-      if (manual) toast('Serverul e deja la zi.', 'ok');
-    }
-    setWatch('idle', 'la zi');
-    // the server runs these mods now -> players may get them
-    schedulePublish('mods sincronizate');
-    setTimeout(() => twoWay('după sincronizare'), 2000);
-  } else if (code === 10) {
-    setTimeout(() => twoWay('după sincronizare'), 2000);
-    watch.lastResult = { kind: 'wait', text: 'Moduri copiate - restartul așteaptă să iasă jucătorii', what: r.what };
-    watch.retryAt = Date.now() + settings.retryMinutes * 60e3;
-    if (r.copied.length || r.removed.length || manual)
-      notify('Moduri copiate pe server', `${r.what}\nSunt jucători online - serverul repornește când se golește.`.trim());
-    setWatch('waiting', 'restart după ce iese lumea');
-  } else if (code === 3) {
-    watch.lastResult = { kind: 'warn', text: 'Oprit: s-ar șterge majoritatea modurilor de pe server (profil gol / greșit?). Nimic schimbat.' };
-    notify('Bifrost: sincronizare oprită', 'S-ar șterge majoritatea modurilor de pe server - profil Thunderstore gol sau greșit? Nu am schimbat nimic.', 'warn');
-    setWatch('attention', 'necesită atenție');
-  } else {
-    failStreak++;
-    watch.lastResult = { kind: 'error', text: `Eroare: ${r.error}` };
-    watch.retryAt = Date.now() + 5 * 60e3;
-    if (failStreak === 1) notify('Bifrost: sincronizarea a eșuat', `${r.error}\nReîncerc în 5 minute.`, 'warn');
-    setWatch('error', 'eroare - reîncerc');
-  }
-}
-function tick() {
-  if (!isAdmin() || job) return;
-  const sig = signature();
-  if (sig !== seenSig) {
-    const first = seenSig === null;
-    seenSig = sig;
-    if (!first) {
-      // a change made by Bifrost itself is complete -> sync after a few seconds instead of waiting for TMM to settle
-      changedAt = ownSource() ? Date.now() - Math.max(0, settings.quietSeconds - 5) * 1000 : Date.now();
-      watch.dirty = true; const pr = readProfile(); checkInstalling(pr.mods); send('mods', pr); setWatch('change', ownSource() ? 'modurile s-au schimbat...' : 'Thunderstore a schimbat modurile...');
-    }
-    return;
-  }
-  if (changedAt && sig === syncedSig) { changedAt = null; watch.dirty = false; setWatch('idle', 'la zi'); }
-  if (!settings.autoSync) { if (watch.dirty && watch.state !== 'off') setWatch('off', 'auto-sync oprit - ai schimbări nesincronizate'); return; }
-  if (changedAt && Date.now() - changedAt >= settings.quietSeconds * 1000) { syncNow('Thunderstore a schimbat modurile'); return; }
-  if (watch.retryAt && Date.now() >= watch.retryAt) syncNow('reîncercare programată');
-}
-
-// ---------- server status (one ssh round trip) ----------
-const STATUS_SH = c => `
-C='${c}'
-st=$(docker inspect -f '{{.State.Status}}|{{.State.StartedAt}}' "$C" 2>/dev/null || echo 'missing|')
-echo "STATE|$st"
-case "$st" in running*)
-  docker logs --since "\${st#*|}" "$C" 2>&1 | grep -E 'is active with|now [0-9]+ player|Got character ZDOID from|Connections [0-9]+ ZDOS|OnCheckJoinCodeSuccess|Game server connected|registered with join code' | tail -400 | sed 's/^/LOG|/'
-  if docker exec "$C" valheim-is-idle >/dev/null 2>&1; then echo 'IDLE|1'; else echo 'IDLE|0'; fi
-;; esac
-`;
-function ssh(script, timeoutMs = 25000) {
-  return new Promise(resolve => {
-    const p = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', settings.server, 'sh -s'], { windowsHide: true });
-    let out = '', err = '';
-    const t = setTimeout(() => p.kill(), timeoutMs);
-    p.stdout.on('data', d => out += d); p.stderr.on('data', d => err += d);
-    p.on('error', e => { err += e.message; });
-    p.on('close', code => { clearTimeout(t); resolve({ code, out, err }); });
-    p.stdin.end(script.replace(/\r/g, ''));
-  });
-}
-let status = { reachable: null, container: null, checkedAt: null };
-let polling = false;
-async function pollStatus() {
-  if (!isAdmin() || polling || !settings.server) return; polling = true;
-  const prevCode = status.joinCode;
-  try {
-    const { code, out, err } = await ssh(STATUS_SH(settings.container));
-    const s = { reachable: code === 0 || /STATE\|/.test(out), checkedAt: Date.now(), error: code === 0 ? null : err.trim().split('\n').pop() };
-    const logLines = [];
-    for (const l of out.split('\n')) {
-      if (l.startsWith('STATE|')) { const [, st, at] = l.trim().split('|'); s.container = st; s.startedAt = at ? Date.parse(at) : null; }
-      else if (l.startsWith('IDLE|')) s.idle = l.trim().endsWith('1');
-      else if (l.startsWith('LOG|')) logLines.push(l.slice(4));
-    }
-    const when = l => { const m = l.match(/(\d\d)\/(\d\d)\/(\d{4}) (\d\d):(\d\d):(\d\d)/); return m ? new Date(+m[3], +m[1] - 1, +m[2], +m[4], +m[5], +m[6]).getTime() : null; };
-    let lastActive = -1, lastBad = -1;
-    const seen = {};
-    logLines.forEach((l, i) => {
-      let m;
-      if ((m = l.match(/with join code (\d+) and IP (\S+) is active with (\d+) player/))) { s.joinCode = m[1]; s.publicIp = m[2]; s.joinCodeAt = when(l); lastActive = i; }
-      if ((m = l.match(/(?:now|with) (\d+) player\(s\)/)) || (m = l.match(/Connections (\d+) ZDOS/))) { s.players = +m[1]; s.playersAt = when(l); }
-      if ((m = l.match(/Got character ZDOID from (.+?) : (-?\d+):(\d+)/)) && m[2] !== '0') seen[m[1]] = when(l);
-      if (/Game server connected/.test(l)) s.gameUp = true;
-      if (/OnCheckJoinCodeSuccess/.test(l)) lastBad = i;
-    });
-    s.codeBroken = lastBad > lastActive;
-    s.recent = Object.entries(seen).map(([name, t]) => ({ name, t })).sort((a, b) => b.t - a.t);
-    if (s.idle === true) s.players = 0;
-    status = s;
-  } catch (e) { status = { reachable: false, error: e.message, checkedAt: Date.now() }; }
-  polling = false;
-  send('status', status); updateTray();
-  if (status.joinCode && status.joinCode !== prevCode && !status.codeBroken && prevCode !== undefined) schedulePublish('join code nou');
-}
-
-// ---------- two-way: configs + mods put on the server by hand ----------
-let twoWayBusy = false;
-// which mod a config file belongs to: BepInEx names configs after the plugin GUID (folders too, mostly), and that
-// GUID is a string inside the plugin's DLL -> the mod's server/client choice from mods.json
-async function configSides(rels) {
-  const st = readState(), pr = getProfile(), best = new Map();   // rel -> { key, score }
-  const names = rels.map(r => r.split('/')[0].replace(/\.(cfg|ya?ml|json|txt)$/i, ''));
-  const tokens = names.map(n => n.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 3));
-  for (const [k, p] of Object.entries(pr.packages)) {
-    for (const f of (p.files || []).filter(x => /\.dll$/i.test(x))) {
-      let txt;
-      try { txt = fs.readFileSync(path.join(pr.dir, ...f.split('/'))).toString('latin1'); } catch { continue; }
-      rels.forEach((r, i) => {
-        if (names[i].length < 4 || !txt.includes(names[i])) return;
-        // other mods may mention a GUID (soft dependencies): prefer the package whose name matches it best
-        const score = tokens[i].filter(t => k.toLowerCase().includes(t)).length;
-        if (!best.has(r) || score > best.get(r).score) best.set(r, { key: k, score });
-      });
-      await new Promise(res => setImmediate(res));   // big DLLs: keep the UI responsive
-    }
-  }
-  return new Map([...best].map(([r, b]) => [r, st.mods[b.key] === 'client' ? 'client' : 'server']));
-}
-const serverSync = () => new ServerSync({ server: settings.server, container: settings.container, profileDir: getProfile().dir, stateFile: path.join(DATA, 'config-sync.json'), log });
-async function twoWay(reason) {
-  if (!ownSource() || !settings.server || twoWayBusy || job || !(settings.syncConfigs || settings.pullServerMods)) return;
-  twoWayBusy = true;
-  const ss = serverSync(), pr = getProfile(), res = { at: Date.now(), push: 0, pull: 0, mods: [], error: null };
-  try {
-    if (settings.pullServerMods) {
-      // mods on the server that the sync did not put there and the profile does not have
-      const st = readState(), have = new Set(Object.keys(pr.packages));
-      const extras = (await ss.remotePlugins()).filter(n => !have.has(n) && !st.installed.includes(n) && !BUILTIN.test(n));
-      for (const e of extras) {
-        if (job) break;
-        const m = e.match(/^(.+?)-(\d+\.\d+\.\d+)$/), full = m ? m[1] : e, ver = m ? m[2] : null;
-        setJob({ kind: 'pull', label: `Aduc de pe server: ${e}`, started: Date.now() });
-        try {
-          if (pr.packages[full]) {
-            // the same mod under a hand-made folder name: keep ours, drop the duplicate
-            await ss.removeRemotePlugin(e);
-            log(`Pe server era și ${e} (pus de mână) - îl înlocuiesc cu ${full} din profil`);
-          } else if (catalogIndex.get(full)) {
-            await installThunderstore({ key: full, full, ver: ver || catalogIndex.get(full).ver, role: 'user', title: catalogIndex.get(full).name }, new Set());
-            await ss.removeRemotePlugin(e);
-            log(`Adus de pe server: ${full} ${ver || ''} (din Thunderstore)`, 'done');
-          } else {
-            const tmp = path.join(DATA, 'cache', 'tmp', `srv-${Date.now()}`);
-            const src = await ss.fetchPlugin(e, tmp);
-            pr.importManual(e, src, { ver: '', role: 'user', source: 'manual', title: e });
-            fs.rmSync(tmp, { recursive: true, force: true });
-            log(`Adus de pe server: ${e} (manual)`, 'done');
-          }
-          sideHints[full] = 'server';
-          res.mods.push(full);
-        } finally { setJob(null); }
-      }
-      if (res.mods.length) {
-        // mods that live on the server are server mods; the next sync takes them over
-        const st2 = readState();
-        for (const n of res.mods) st2.mods[n] = 'server';
-        for (const n of Object.keys(sideHints)) if (res.mods.includes(n)) delete sideHints[n];
-        st2.raw.mods = st2.mods; if (!st2.raw.installed) st2.raw.installed = st2.installed;
-        fs.writeFileSync(STATE_FILE(), JSON.stringify(st2.raw, null, 2));
-        notify('Moduri aduse de pe server', res.mods.join(', '));
-        send('mods', modsPayload());
-      }
-    }
-    if (settings.syncConfigs) {
-      const r = await ss.syncConfigs({ sideOf: configSides });
-      res.push = r.push.length; res.pull = r.pull.length;
-      if (r.push.length) log(`Configurări trimise pe server (${reason}): ${r.push.join(', ')}`, 'done');
-      if (r.pull.length) log(`Configurări aduse de pe server (${reason}): ${r.pull.join(', ')}`, 'done');
-    }
-  } catch (e) { res.error = e.message; log(`Sincronizarea configurărilor: ${e.message}`, 'error'); }
-  finally { twoWayBusy = false; watch.twoWay = res; send('watch', watch); }
-}
-
-// ---------- server list for players (GitHub) ----------
-const listState = { at: null, ok: null, error: null, changed: null, busy: false };
-let publishTimer = null;
-function schedulePublish(reason) {
-  if (!isAdmin() || !settings.autoPublish) return;
-  clearTimeout(publishTimer);
-  publishTimer = setTimeout(() => publishList(reason), 5000);
-}
-function buildList() {
-  const mods = readProfile().mods;
-  return serverList.build({
-    mods, nexusLinks: settings.nexusLinks,
-    server: {
-      name: settings.serverName, world: settings.serverWorld, joinCode: status.codeBroken ? null : status.joinCode || null,
-      // server.json is public: the home IP goes in only if the admin explicitly wants it (join codes work without it)
-      joinCodeAt: status.joinCodeAt || null, address: settings.publishAddress ? status.publicIp || null : null,
-    },
-  });
-}
-async function publishList(reason) {
-  if (!isAdmin() || listState.busy) return { ok: false, error: 'ocupat' };
-  const list = { ...buildList(), updatedAt: Date.now() };
-  if (list.required.length < 3) { listState.error = 'Profilul pare gol - nu public lista.'; send('list', listState); return { ok: false, error: listState.error }; }
-  if (readState().restartPending) { listState.error = 'Serverul nu a repornit încă cu modurile noi - public după restart.'; send('list', listState); return { ok: false, error: listState.error }; }
-  listState.busy = true; send('list', listState);
-  try {
-    const r = await serverList.publish(settings.manifestRepo, list, `server list: ${reason}`);
-    Object.assign(listState, { at: Date.now(), ok: true, error: null, changed: r.changed });
-    if (r.changed) log(`Lista pentru prieteni publicată (${reason}): ${list.required.length} obligatorii, ${list.recommended.length} recomandate`, 'done');
-    return { ok: true, changed: r.changed };
-  } catch (e) {
-    Object.assign(listState, { at: Date.now(), ok: false, error: e.message });
-    log(`Lista pentru prieteni nu s-a publicat: ${e.message}`, 'error');
-    return { ok: false, error: e.message };
-  } finally { listState.busy = false; send('list', listState); }
-}
-
-// ---------- Thunderstore catalog (browse + latest versions) ----------
+// =====================================================================================================
+// THUNDERSTORE CATALOG
+// =====================================================================================================
 const CATALOG_FILE = path.join(DATA, 'catalog.json');
 let catalog = readJson(CATALOG_FILE, null);
 let catalogIndex = new Map();
 let catalogBusy = null;
-let updates = {};   // name -> { latest, downloads }
-const ownPack = () => `${settings.modpackTeam}-${settings.modpackName}`;
+let updates = {};
+const ownPack = () => `${srv()?.modpackTeam}-${srv()?.modpackName}`;
 function indexCatalog() {
   catalogIndex = new Map((catalog?.packages || []).map(p => [p.full, p]));
   const out = {};
-  for (const m of modsPayload().mods) { const p = catalogIndex.get(m.name); if (p) out[m.name] = { latest: p.ver, downloads: p.dl }; }
+  if (srv()) for (const k of Object.keys(getProfile().packages)) { const p = catalogIndex.get(k); if (p) out[k] = { latest: p.ver, downloads: p.dl }; }
   const own = catalogIndex.get(ownPack());
-  if (own) out[ownPack()] = { latest: own.ver, downloads: own.dl };
-  const prev = updates[ownPack()];
-  if (prev && (!out[ownPack()] || cmpVer(prev.latest, out[ownPack()].latest) > 0)) out[ownPack()] = prev;
+  if (own) out[ownPack()] = { latest: own.ver };
   updates = out;
 }
 function refreshCatalog() {
   if (catalogBusy) return catalogBusy;
   send('catalogState', { busy: true });
   catalogBusy = new Promise(resolve => {
-    // unpacked from app.asar in the installed build (see build.asarUnpack)
-    const p = spawn(process.execPath, [path.join(__dirname.replace(/app.asar$/, 'app.asar.unpacked'), 'catalog-worker.js'), CATALOG_FILE],
+    const p = spawn(process.execPath, [path.join(__dirname.replace(/app\.asar$/, 'app.asar.unpacked'), 'catalog-worker.js'), CATALOG_FILE],
       { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, windowsHide: true });
     let out = '', err = '';
     p.stdout.on('data', d => out += d); p.stderr.on('data', d => err += d);
@@ -580,7 +305,7 @@ function refreshCatalog() {
       catalogBusy = null;
       if (code === 0) { catalog = readJson(CATALOG_FILE, catalog); indexCatalog(); log(`Catalog Thunderstore actualizat: ${out.trim()}`); }
       else log(`Catalogul Thunderstore nu s-a putut descărca: ${err.trim()}`, 'error');
-      send('updates', updates); if (isAdmin()) send('modpack', modpackInfo());
+      send('updates', updates); send('modpack', modpackInfo());
       send('catalogState', { busy: false, fetched: catalog?.fetched || null, error: code === 0 ? null : err.trim() });
       resolve(code === 0);
     });
@@ -589,181 +314,17 @@ function refreshCatalog() {
 }
 async function checkUpdates(maxAgeMs = 0) {
   if (!catalog || Date.now() - catalog.fetched > maxAgeMs) await refreshCatalog();
-  else { indexCatalog(); send('updates', updates); if (isAdmin()) send('modpack', modpackInfo()); }
-}
-
-// ---------- admin: installing through Thunderstore Mod Manager ----------
-const installing = {};   // full name -> { ver, at }
-const sideHints = {};
-function applyHints() {
-  if (!isAdmin() || job || !Object.keys(sideHints).length) return;
-  const st = readState();
-  let changed = false;
-  for (const [n, side] of Object.entries(sideHints)) { if (!st.mods[n]) { st.mods[n] = side; changed = true; } delete sideHints[n]; }
-  if (!changed) return;
-  st.raw.mods = st.mods; if (!st.raw.installed) st.raw.installed = st.installed;
-  fs.writeFileSync(STATE_FILE(), JSON.stringify(st.raw, null, 2));
-}
-function installViaTmm(full, ver) {
-  const p = catalogIndex.get(full);
-  if (!p) return { ok: false, error: 'Nu găsesc pachetul în catalog.' };
-  ver = ver || p.ver;
-  const cats = p.cats || [];
-  const side = cats.includes('Server-side') ? 'server' : cats.includes('Client-side') ? 'client' : null;
-  if (side) { sideHints[full] = side; applyHints(); }
-  installing[full] = { ver, at: Date.now() };
-  send('installing', installing);
-  log(`Instalez ${full} ${ver} prin Thunderstore Mod Manager${side ? ` (marcat ${side} după categoriile Thunderstore)` : ''}`);
-  shell.openExternal(`ror2mm://v1/install/thunderstore.io/${encodeURIComponent(p.owner)}/${encodeURIComponent(p.name)}/${ver}/`);
-  return { ok: true, side, via: 'tmm' };
-}
-function checkInstalling(mods) {
-  let changed = false;
-  for (const [n, x] of Object.entries(installing)) {
-    const m = mods.find(y => y.name === n);
-    if (m && m.version === x.ver) { delete installing[n]; changed = true; log(`${n} ${x.ver} instalat`, 'done'); }
-    else if (Date.now() - x.at > 5 * 60e3) { delete installing[n]; changed = true; }
-  }
-  if (changed) send('installing', installing);
-}
-
-// ---------- modpack ----------
-function modpackInfo() {
-  if (!isAdmin() || !settings.modpackName) return { configured: false };
-  const man = readJson(path.join(MODPACK_DIR(), 'manifest.json'), null);
-  const prof = readProfile().mods.filter(m => m.enabled && !m.manual && !m.modpack);
-  const inPack = {};
-  for (const d of (man?.dependencies || [])) { const m = parseDep(d); if (m) inPack[m.full] = m.ver; }
-  const added = [], changed = [], removed = [];
-  for (const m of prof) {
-    if (!(m.name in inPack)) added.push({ name: m.name, to: m.version });
-    else if (inPack[m.name] !== m.version) changed.push({ name: m.name, from: inPack[m.name], to: m.version });
-  }
-  const profNames = new Set(prof.map(m => m.name));
-  for (const n of Object.keys(inPack)) if (!profNames.has(n)) removed.push({ name: n, from: inPack[n] });
-  const local = man?.version_number || null;
-  const zip = local && path.join(MODPACK_DIR(), `${settings.modpackName}-${local}.zip`);
-  return {
-    configured: true, name: ownPack(), local, published: updates[ownPack()]?.latest || null, count: Object.keys(inPack).length,
-    added, changed, removed, hasToken: !!settings.tokenEnc, zip: zip && fs.existsSync(zip) ? zip : null,
-    url: `${TS}/c/valheim/p/${settings.modpackTeam}/${settings.modpackName}/`,
-  };
-}
-async function buildModpack() {
-  const deps = readProfile().mods.filter(m => m.enabled && !m.manual && !m.modpack).map(m => `${m.name}-${m.version}`);
-  const { code, lines } = await runProcess('build', 'Construiesc modpack-ul', process.execPath, [path.join(MODPACK_DIR(), 'build-modpack.mjs')],
-    { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...(ownSource() ? { BIFROST_DEPS: JSON.stringify(deps) } : {}) }, cwd: MODPACK_DIR() });
-  send('modpack', modpackInfo());
-  return { ok: code === 0, info: modpackInfo(), error: code === 0 ? null : lines.filter(l => l.trim()).slice(-2).join(' ') };
-}
-async function tsApi(token, method, p, body) {
-  const r = await net.fetch(`${TS}${p}`, {
-    method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await r.text();
-  let j = null; try { j = JSON.parse(text); } catch { }
-  if (!r.ok) throw new Error(`${method} ${p}: HTTP ${r.status} ${text.slice(0, 300)}`);
-  return j;
-}
-async function publishModpack() {
-  const token = dec(settings.tokenEnc);
-  if (!token) return { ok: false, error: 'Lipsește tokenul Thunderstore (Setări).' };
-  const b = await buildModpack();
-  if (!b.ok) return b;
-  const zip = b.info.zip;
-  if (!zip) return { ok: false, error: 'Nu găsesc zip-ul construit.' };
-  setJob({ kind: 'publish', label: `Public ${path.basename(zip)}`, started: Date.now() });
-  log(`▶ Public ${path.basename(zip)} pe Thunderstore`, 'start');
-  let uuid = null;
-  try {
-    const data = fs.readFileSync(zip);
-    const init = await tsApi(token, 'POST', '/api/experimental/usermedia/initiate-upload/', { filename: path.basename(zip), file_size_bytes: data.length });
-    uuid = init.user_media.uuid;
-    const parts = [];
-    for (const u of init.upload_urls) {
-      const chunk = data.subarray(u.offset, u.offset + u.length);
-      const r = await net.fetch(u.url, { method: 'PUT', body: chunk, headers: { 'Content-MD5': crypto.createHash('md5').update(chunk).digest('base64') } });
-      const etag = r.headers.get('etag');
-      if (!r.ok || !etag) throw new Error(`upload partea ${u.part_number}: HTTP ${r.status}`);
-      parts.push({ ETag: etag, PartNumber: u.part_number });
-    }
-    await tsApi(token, 'POST', `/api/experimental/usermedia/${uuid}/finish-upload/`, { parts });
-    let cats = [];
-    try {
-      const c = await tsApi(token, 'GET', '/api/experimental/community/valheim/category/');
-      const hit = (c.results || []).find(x => /modpack/i.test(x.slug) || /modpack/i.test(x.name));
-      if (hit) cats = [hit.slug];
-    } catch { }
-    const res = await tsApi(token, 'POST', '/api/experimental/submission/submit/', {
-      author_name: settings.modpackTeam, communities: ['valheim'], community_categories: { valheim: cats }, categories: [], has_nsfw_content: false, upload_uuid: uuid,
-    });
-    const v = res?.package_version?.version_number || b.info.local;
-    log(`■ Publicat ${settings.modpackName} ${v}`, 'done');
-    notify('Modpack publicat', `${settings.modpackName} ${v} e pe Thunderstore.`);
-    updates[ownPack()] = { ...(updates[ownPack()] || {}), latest: v };
-    return { ok: true, version: v };
-  } catch (e) {
-    if (uuid) { try { await tsApi(token, 'POST', `/api/experimental/usermedia/${uuid}/abort-upload/`, {}); } catch { } }
-    log(`■ Publicarea a eșuat: ${e.message}`, 'error');
-    return { ok: false, error: e.message };
-  } finally { setJob(null); send('modpack', modpackInfo()); }
+  else { indexCatalog(); send('updates', updates); send('modpack', modpackInfo()); }
 }
 
 // =====================================================================================================
-// PLAYER
+// INSTALLING (Thunderstore + Nexus) into the current server's profile
 // =====================================================================================================
-const nexus = new Nexus({ fetch: (...a) => net.fetch(...a), appName: 'Bifrost', appVersion: app.getVersion() });
-let profile = null;
-const getProfile = () => profile || (profile = new Profile({ dir: path.join(DATA, 'profile'), cacheDir: path.join(DATA, 'cache'), fetch: (...a) => net.fetch(...a), log }));
-const MANIFEST_CACHE = path.join(DATA, 'server-list.json');
-let manifest = readJson(MANIFEST_CACHE, null), manifestErr = null, manifestAt = null;
-let game = { game: null, steam: null };
-let progress = null;          // { phase, text, done, total, bytes, totalBytes }
-let nexusWaiting = [];        // nexus entries waiting for a "Mod Manager Download" click (free accounts)
+const nexus = new Nexus({ fetch: fetchN, appName: 'Bifrost', appVersion: OWN_VERSION });
+const installing = {};
+let nexusWaiting = [];
+const nexusPending = {};
 
-async function refreshManifest() {
-  try {
-    manifest = await serverList.fetchManifest((...a) => net.fetch(...a), settings.manifestRepo);
-    fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(MANIFEST_CACHE, JSON.stringify(manifest));
-    manifestErr = null;
-  } catch (e) { manifestErr = e.message; }
-  manifestAt = Date.now();
-  send('player', playerInfo());
-  return manifest;
-}
-function desired() {
-  const out = [];
-  if (!manifest || isAdmin()) return out;
-  for (const m of manifest.required) out.push({ key: m.full, full: m.full, ver: m.ver, role: 'required', source: 'thunderstore', title: m.title });
-  for (const m of manifest.recommended || []) if (settings.recommended[m.full]) out.push({ key: m.full, full: m.full, ver: m.ver, role: 'recommended', source: 'thunderstore', title: m.title });
-  for (const n of manifest.nexus || []) if (n.required || settings.nexusChosen[n.key])
-    out.push({ key: n.key, full: n.key, ver: String(n.version || n.fileId), role: n.required ? 'required' : 'recommended', source: 'nexus', title: n.title, modId: n.modId, fileId: n.fileId });
-  // BepInEx first
-  return out.sort((a, b) => (b.full === BEPINEX) - (a.full === BEPINEX));
-}
-function playerMods() {
-  const p = getProfile().packages;
-  return {
-    mods: Object.entries(p).map(([k, x]) => ({ name: k, version: x.ver, role: x.role, source: x.source, title: x.title || k, size: x.size || 0, installedAt: x.installedAt })),
-    profileFound: true, profile: 'Bifrost',
-  };
-}
-const modsPayload = () => isAdmin() ? readProfile() : playerMods();
-function playerInfo() {
-  const pr = getProfile();
-  const plan = manifest ? pr.plan(desired()) : { install: [], remove: [] };
-  const bytes = plan.install.reduce((s, d) => s + (catalogIndex.get(d.full)?.size || 0), 0);
-  return {
-    manifest, error: manifestErr, at: manifestAt, game: { ...game, ...(game.game ? Profile.gameOwner(game.game) : {}), backup: !!(game.game && fs.existsSync(path.join(game.game, 'bifrost-backup'))) }, progress, busy: !!job,
-    plan: { install: plan.install.map(d => ({ key: d.key, ver: d.ver, have: pr.packages[d.key]?.ver || null, source: d.source, title: d.title })), remove: plan.remove, bytes },
-    required: manifest ? manifest.required.length + (manifest.nexus || []).filter(n => n.required).length : 0,
-    installed: Object.keys(pr.packages).length, nexusWaiting: nexusWaiting.map(n => ({ key: n.key, title: n.title, modId: n.modId, fileId: n.fileId })),
-    nexusUser: settings.nexusUser, recommended: settings.recommended, nexusChosen: settings.nexusChosen,
-  };
-}
-function setProgress(p) { progress = p; send('progress', progress); }
-
-// one Thunderstore package + its dependencies (pinned versions; an equal or newer installed one is fine)
 async function installThunderstore(item, wanted) {
   const pr = getProfile();
   const queue = [item];
@@ -773,9 +334,9 @@ async function installThunderstore(item, wanted) {
     if (have && have.ver === d.ver) continue;
     if (have && d.role === 'dep' && cmpVer(have.ver, d.ver) >= 0) continue;
     setProgress({ ...progress, text: `${d.title || d.full} ${d.ver}`, bytes: 0, totalBytes: 0 });
-    const zip = await pr.thunderstoreZip(d.full, d.ver, (got, total) => setProgress({ ...progress, bytes: got, totalBytes: total }), undefined);
+    const zip = await pr.thunderstoreZip(d.full, d.ver, (got, total) => setProgress({ ...progress, bytes: got, totalBytes: total }));
     const deps = await pr.installZip(d.key, zip, {
-      ver: d.ver, role: have && have.role === 'required' && d.role === 'dep' ? 'required' : (have?.role === 'user' && d.role === 'dep' ? 'user' : d.role),
+      ver: d.ver, role: have && have.role !== 'dep' && d.role === 'dep' ? have.role : d.role,
       source: 'thunderstore', title: d.title || d.full, size: fs.statSync(zip).size,
     }, () => Profile.thunderstoreMap(d.full));
     log(`  instalat ${d.full} ${d.ver}`, 'out');
@@ -788,8 +349,9 @@ async function installThunderstore(item, wanted) {
     }
   }
 }
-async function installNexus(entry, nxm, pr = getProfile()) {
-  const key = dec(settings.nexusKeyEnc);
+async function installNexus(entry, nxm) {
+  const pr = getProfile();
+  const key = dec(G.nexusKeyEnc);
   if (!key) throw new Error('Pune cheia Nexus în Setări.');
   nexus.key = key;
   const url = await nexus.downloadUrl(entry.modId, entry.fileId, nxm);
@@ -802,20 +364,132 @@ async function installNexus(entry, nxm, pr = getProfile()) {
     Profile.nexusMap(entry.key), dllName);
   log(`  instalat ${entry.title} (Nexus ${entry.modId})`, 'out');
 }
+const sideFromCats = p => { const c = p?.cats || []; return c.includes('Server-side') ? 'server' : c.includes('Client-side') ? 'client' : null; };
+function hintSide(name, side) {
+  if (!isAdmin() || !side) return;
+  const st = readState();
+  if (!st.mods[name]) { st.mods[name] = side; writeState(st); }
+}
 
+// a mod picked in Descoperă (players: their own extra; admins: goes to the server too)
+async function installPackage(full, ver) {
+  if (!srv()) return { ok: false, error: 'Adaugă sau creează întâi un server.' };
+  if (job) return { ok: false, error: 'Lucrez deja - încearcă în câteva secunde.' };
+  const p = catalogIndex.get(full);
+  ver = ver || p?.ver;
+  if (!ver) return { ok: false, error: 'Nu găsesc pachetul în catalog.' };
+  setJob({ kind: 'install', label: `Instalez ${full}`, started: Date.now() });
+  installing[full] = { ver, at: Date.now() }; send('installing', installing);
+  try {
+    setProgress({ phase: 'install', text: full, done: 0, total: 1 });
+    const have = getProfile().packages[full];
+    await installThunderstore({ key: full, full, ver, role: have && have.role !== 'dep' ? have.role : 'user', title: p ? p.name.replace(/_/g, ' ') : full }, new Set(desired().map(d => d.key)));
+    hintSide(full, sideFromCats(p));
+    log(`${full} ${ver} instalat`, 'done');
+    return { ok: true, via: 'bifrost', side: sideFromCats(p) };
+  } catch (e) { log(`${full}: ${e.message}`, 'error'); return { ok: false, error: e.message }; }
+  finally { delete installing[full]; send('installing', installing); setProgress(null); setJob(null); afterProfileChange(); }
+}
+function removePackage(key) {
+  if (job) return { ok: false, error: 'Lucrez deja.' };
+  const pr = getProfile(), p = pr.packages[key];
+  if (!p) return { ok: false, error: 'Nu e instalat.' };
+  if (p.role === 'required') return { ok: false, error: 'Serverul are nevoie de el.' };
+  if (key === BEPINEX) return { ok: false, error: 'BepInEx e baza tuturor modurilor - nu se scoate.' };
+  const users = Object.entries(pr.packages).filter(([k, x]) => k !== key && (x.deps || []).some(d => parseDep(d)?.full === key)).map(([k]) => k);
+  if (users.length) return { ok: false, error: `Au nevoie de el: ${users.join(', ')}. Scoate-le întâi pe acelea.` };
+  if (p.role === 'recommended') { const s = srv(); delete s.recommended[key]; delete s.nexusChosen[key]; saveSettings(); }
+  pr.remove(key);
+  for (const k of pr.orphans()) pr.remove(k);
+  log(`${key} dezinstalat`);
+  afterProfileChange();
+  return { ok: true };
+}
+async function updateAll() {
+  if (job) return { ok: false, error: 'Lucrez deja.' };
+  const pr = getProfile();
+  const todo = Object.entries(pr.packages).filter(([k, x]) => x.source === 'thunderstore' && x.role !== 'required' && catalogIndex.get(k) && cmpVer(catalogIndex.get(k).ver, x.ver) > 0);
+  if (!todo.length) return { ok: true, count: 0 };
+  setJob({ kind: 'update', label: `Actualizez ${todo.length} moduri`, started: Date.now() });
+  log(`▶ ${job.label}`, 'start');
+  try {
+    setProgress({ phase: 'install', text: '', done: 0, total: todo.length });
+    for (const [i, [k, x]] of todo.entries()) {
+      setProgress({ ...progress, done: i });
+      await installThunderstore({ key: k, full: k, ver: catalogIndex.get(k).ver, role: x.role, title: x.title }, new Set(todo.map(t => t[0])));
+    }
+    for (const k of pr.orphans()) pr.remove(k);
+    log(`■ ${todo.length} moduri actualizate`, 'done');
+    return { ok: true, count: todo.length };
+  } catch (e) { log(`■ ${e.message}`, 'error'); return { ok: false, error: e.message }; }
+  finally { setProgress(null); setJob(null); afterProfileChange(); }
+}
+function afterProfileChange() { indexCatalog(); send('mods', modsPayload()); send('player', playerInfo()); send('updates', updates); }
+
+// =====================================================================================================
+// PLAYER: the server's list
+// =====================================================================================================
+let manifest = null, manifestErr = null, manifestAt = null;
+const listCache = () => path.join(serverDir(srv().id), 'list-cache.json');
+function loadManifestCache() { manifest = srv() ? readJson(listCache(), null) : null; manifestErr = null; manifestAt = null; }
+async function refreshManifest() {
+  const s = srv();
+  if (!s?.list) { manifest = null; send('player', playerInfo()); return null; }
+  try {
+    manifest = await listhost.fetchList(fetchN, s.list);
+    writeJson(listCache(), manifest);
+    manifestErr = null;
+    if (s.role === 'player' && manifest.server?.name && manifest.server.name !== s.name) { s.name = manifest.server.name; saveSettings(); send('settings', publicSettings()); }
+  } catch (e) { manifestErr = e.message; }
+  manifestAt = Date.now();
+  send('player', playerInfo());
+  return manifest;
+}
+function desired() {
+  const s = srv(), out = [];
+  if (!manifest || !s || s.role === 'admin') return out;
+  for (const m of manifest.required) out.push({ key: m.full, full: m.full, ver: m.ver, role: 'required', source: 'thunderstore', title: m.title });
+  for (const m of manifest.recommended || []) if (s.recommended[m.full]) out.push({ key: m.full, full: m.full, ver: m.ver, role: 'recommended', source: 'thunderstore', title: m.title });
+  for (const n of manifest.nexus || []) if (n.required || s.nexusChosen[n.key])
+    out.push({ key: n.key, full: n.key, ver: String(n.version || n.fileId), role: n.required ? 'required' : 'recommended', source: 'nexus', title: n.title, modId: n.modId, fileId: n.fileId });
+  return out.sort((a, b) => (b.full === BEPINEX) - (a.full === BEPINEX));
+}
+function playerMods() {
+  const p = srv() ? getProfile().packages : {};
+  return {
+    mods: Object.entries(p).map(([k, x]) => ({ name: k, version: x.ver, role: x.role, source: x.source, title: x.title || k, size: x.size || 0, installedAt: x.installedAt, icon: catalogIndex.get(k)?.icon || null })),
+    profileFound: true, profile: srv()?.name || 'Bifrost',
+  };
+}
+let game = { game: null, steam: null };
+function playerInfo() {
+  const s = srv();
+  if (!s) return { none: true, game };
+  const pr = getProfile();
+  const plan = manifest && s.role === 'player' ? pr.plan(desired()) : { install: [], remove: [] };
+  const bytes = plan.install.reduce((t, d) => t + (catalogIndex.get(d.full)?.size || 0), 0);
+  return {
+    manifest, error: manifestErr, at: manifestAt, role: s.role, progress, busy: !!job, status,
+    game: { ...game, ...(game.game ? Profile.gameOwner(game.game) : {}), backup: !!(game.game && fs.existsSync(path.join(game.game, 'bifrost-backup'))) },
+    plan: { install: plan.install.map(d => ({ key: d.key, ver: d.ver, have: pr.packages[d.key]?.ver || null, source: d.source, title: d.title })), remove: plan.remove, bytes },
+    required: manifest ? manifest.required.length + (manifest.nexus || []).filter(n => n.required).length : 0,
+    installed: Object.keys(pr.packages).length, nexusWaiting: nexusWaiting.map(n => ({ key: n.key, title: n.title, modId: n.modId, fileId: n.fileId })),
+    nexusUser: G.nexusUser, recommended: s.recommended, nexusChosen: s.nexusChosen,
+  };
+}
 async function launchGame() {
   game = await Profile.findGame();
-  if (settings.gameDir && fs.existsSync(path.join(settings.gameDir, 'valheim.exe'))) game.game = settings.gameDir;
+  if (G.gameDir && fs.existsSync(path.join(G.gameDir, 'valheim.exe'))) game.game = G.gameDir;
   if (!game.game) throw new Error('Nu găsesc Valheim (Steam). Alege folderul jocului în Setări.');
   getProfile().prepareGame(game.game);
   getProfile().launch(game.steam);
-  log(`Pornesc Valheim (${game.game})`, 'done');
+  log(`Pornesc Valheim cu profilul „${srv().name}” (${game.game})`, 'done');
 }
 async function playerSync({ launch } = {}) {
+  if (!srv()) return { ok: false, error: 'Adaugă sau creează întâi un server.' };
   if (job) return { ok: false, error: 'Lucrez deja.' };
-  if (isAdmin()) {
-    // the admin's profile is the source of the list - nothing to fetch, just play
-    if (!ownSource()) return { ok: false, error: 'Importă întâi modurile din Thunderstore Mod Manager (Moduri → Importă).' };
+  // admins and personal profiles (no list): the profile is the source - just play
+  if (isAdmin() || !srv().list) {
     try { if (launch) await launchGame(); return { ok: true }; } catch (e) { log(e.message, 'error'); return { ok: false, error: e.message }; }
   }
   setJob({ kind: 'play', label: launch ? 'Pregătesc jocul' : 'Actualizez modurile', started: Date.now() });
@@ -830,378 +504,800 @@ async function playerSync({ launch } = {}) {
     const ts = plan.install.filter(d => d.source === 'thunderstore');
     const nx = plan.install.filter(d => d.source === 'nexus');
     setProgress({ phase: 'install', text: '', done: 0, total: plan.install.length });
-    for (const [i, d] of ts.entries()) {
-      setProgress({ ...progress, done: i });
-      await installThunderstore(d, wanted);
-    }
-    // Nexus: premium downloads directly, free accounts need one click per file on the site
+    for (const [i, d] of ts.entries()) { setProgress({ ...progress, done: i }); await installThunderstore(d, wanted); }
     nexusWaiting = [];
-    for (const d of nx) {
-      if (settings.nexusUser?.premium) { await installNexus(d); continue; }
-      nexusWaiting.push(d);
-    }
+    for (const d of nx) { if (G.nexusUser?.premium) await installNexus(d); else nexusWaiting.push(d); }
     for (const k of plan.remove) { pr.remove(k); log(`  scos ${k}`, 'out'); }
     for (const k of pr.orphans()) { pr.remove(k); log(`  scos ${k} (nu mai e nevoie de el)`, 'out'); }
     setProgress(null);
-    const missingRequired = nexusWaiting.filter(n => n.role === 'required');
     if (nexusWaiting.length) {
       send('player', playerInfo());
       shell.openExternal(Nexus.filesPage(nexusWaiting[0].modId, nexusWaiting[0].fileId));
-      if (missingRequired.length) throw new Error(`Mai trebuie de pe Nexus: ${missingRequired.map(n => n.title).join(', ')} - apasă „Mod Manager Download” pe pagina care s-a deschis.`);
-      toast('Pe pagina Nexus care s-a deschis apasă „Mod Manager Download” - Bifrost îl instalează singur.', 'info');
+      const missing = nexusWaiting.filter(n => n.role === 'required');
+      if (missing.length) throw new Error(`Mai trebuie de pe Nexus: ${missing.map(n => n.title).join(', ')} - apasă „Slow download” pe pagina care s-a deschis.`);
+      toast('Pe pagina Nexus care s-a deschis apasă „Slow download” - Bifrost îl instalează singur.', 'info');
     }
     log(`■ Modurile sunt la zi (${Object.keys(pr.packages).length} pachete)`, 'done');
     if (launch) await launchGame();
     return { ok: true };
-  } catch (e) {
-    setProgress(null);
-    log(`■ ${e.message}`, 'error');
-    return { ok: false, error: e.message };
-  } finally { setJob(null); send('player', playerInfo()); send('mods', modsPayload()); }
+  } catch (e) { setProgress(null); log(`■ ${e.message}`, 'error'); return { ok: false, error: e.message }; }
+  finally { setJob(null); afterProfileChange(); }
 }
 
-// admin, once: bring the Thunderstore Mod Manager profile into Bifrost (same mods + versions, configs, manual mods)
-async function importFromTmm() {
-  if (!isAdmin()) return { ok: false, error: 'Doar în modul admin.' };
-  if (job) return { ok: false, error: 'Lucrez deja.' };
-  const tmm = readTmmProfile();
-  const list = tmm.mods.filter(m => m.enabled && !m.manual && !m.modpack);
-  if (list.length < 3) return { ok: false, error: 'Profilul Thunderstore Mod Manager pare gol.' };
-  setJob({ kind: 'import', label: 'Import din Thunderstore Mod Manager', started: Date.now() });
-  log(`▶ ${job.label}: ${list.length} moduri`, 'start');
-  try {
-    const pr = getProfile();
-    const names = new Set(list.map(m => m.name));
-    setProgress({ phase: 'install', text: '', done: 0, total: list.length });
-    for (const [i, m] of list.sort((a, b) => (b.name === BEPINEX) - (a.name === BEPINEX)).entries()) {
-      setProgress({ ...progress, done: i });
-      await installThunderstore({ key: m.name, full: m.name, ver: m.version, role: 'user', title: m.displayName }, names);
-    }
-    for (const m of tmm.mods.filter(x => x.manual)) {
-      pr.importManual(m.name, path.join(tmmPluginsDir(), m.name), { ver: '', role: 'user', source: 'manual', title: m.displayName });
-      log(`  copiat ${m.name} (manual)`, 'out');
-    }
-    // the admin's own mod settings
-    const cfg = path.join(tmmProfileDir(), 'BepInEx', 'config');
-    if (fs.existsSync(cfg)) fs.cpSync(cfg, path.join(pr.dir, 'BepInEx', 'config'), { recursive: true, force: true });
-    settings.adminSource = 'bifrost'; saveSettings();
-    seenSig = signature(); syncedSig = seenSig;
-    setTimeout(() => twoWay('după import'), 3000);
-    log(`■ Import gata: ${Object.keys(pr.packages).length} pachete în profilul Bifrost (+ configurările tale)`, 'done');
-    return { ok: true, count: Object.keys(pr.packages).length };
-  } catch (e) { log(`■ Importul a eșuat: ${e.message}`, 'error'); return { ok: false, error: e.message }; }
-  finally { setProgress(null); setJob(null); send('settings', publicSettings()); send('mods', modsPayload()); send('player', playerInfo()); }
+// =====================================================================================================
+// ADMIN: mods, server sync, status, list
+// =====================================================================================================
+function transport(s = srv()) {
+  if (!s?.conn) return null;
+  return makeTransport(s.conn, dec(s.connSecretEnc));
 }
-// admin: every Thunderstore mod to its newest version (with new dependencies)
-async function updateAll() {
-  if (job) return { ok: false, error: 'Lucrez deja.' };
-  const pr = getProfile();
-  const todo = Object.entries(pr.packages).filter(([k, x]) => x.source === 'thunderstore' && catalogIndex.get(k) && cmpVer(catalogIndex.get(k).ver, x.ver) > 0);
-  if (!todo.length) return { ok: true, count: 0 };
-  setJob({ kind: 'update', label: `Actualizez ${todo.length} moduri`, started: Date.now() });
-  log(`▶ ${job.label}`, 'start');
-  try {
-    setProgress({ phase: 'install', text: '', done: 0, total: todo.length });
-    for (const [i, [k, x]] of todo.entries()) {
-      setProgress({ ...progress, done: i });
-      await installThunderstore({ key: k, full: k, ver: catalogIndex.get(k).ver, role: x.role, title: x.title }, new Set(todo.map(t => t[0])));
-    }
-    for (const k of pr.orphans()) pr.remove(k);
-    log(`■ ${todo.length} moduri actualizate`, 'done');
-    return { ok: true, count: todo.length };
-  } catch (e) { log(`■ ${e.message}`, 'error'); return { ok: false, error: e.message }; }
-  finally { setProgress(null); setJob(null); send('mods', modsPayload()); send('player', playerInfo()); }
+function adminMods() {
+  const st = readState(), pr = getProfile(), s = srv();
+  const builtin = new RegExp(s.builtin || 'BepInExPack', 'i');
+  const mods = Object.entries(pr.packages).map(([k, x]) => {
+    const c = catalogIndex.get(k);
+    return {
+      name: k, displayName: (c?.name || x.title || k).replace(/_/g, ' '),
+      author: c?.owner || (x.source === 'nexus' ? 'Nexus' : x.source === 'manual' ? 'instalat manual' : k.split('-')[0]),
+      description: c?.desc || (x.source === 'manual' ? 'Nu e din Thunderstore / Nexus.' : ''), version: x.ver, enabled: true,
+      url: c?.url || (x.modId ? `https://www.nexusmods.com/valheim/mods/${x.modId}` : null), builtin: builtin.test(k),
+      modpack: !!s.modpackName && k.endsWith(`-${s.modpackName}`), side: st.mods[k] || null, onServer: st.installed.includes(k),
+      icon: fs.existsSync(path.join(pluginsDir(), k, 'icon.png')) ? `modicon://icon/${encodeURIComponent(k)}` : (c?.icon || null),
+      manual: x.source !== 'thunderstore', role: x.role, source: x.source, size: x.size || 0,
+      nexus: x.source === 'nexus' ? { modId: x.modId, fileId: x.fileId, version: x.ver, title: x.title } : (s.nexusLinks[k] || null),
+    };
+  });
+  return { mods, restartPending: st.restartPending, profileFound: true, profile: s.name, source: 'bifrost' };
 }
-
-// a mod the player picked in Descoperă
-async function playerInstall(full, ver) {
-  if (job) return { ok: false, error: 'Lucrez deja - încearcă în câteva secunde.' };
-  const p = catalogIndex.get(full);
-  ver = ver || p?.ver;
-  if (!ver) return { ok: false, error: 'Nu găsesc pachetul în catalog.' };
-  if (isAdmin() && p) { const cats = p.cats || []; const side = cats.includes('Server-side') ? 'server' : cats.includes('Client-side') ? 'client' : null; if (side) sideHints[full] = side; }
-  setJob({ kind: 'install', label: `Instalez ${full}`, started: Date.now() });
-  installing[full] = { ver, at: Date.now() }; send('installing', installing);
-  try {
-    setProgress({ phase: 'install', text: full, done: 0, total: 1 });
-    const have = getProfile().packages[full];
-    await installThunderstore({ key: full, full, ver, role: have && have.role !== 'dep' ? have.role : 'user', title: p ? p.name.replace(/_/g, ' ') : full }, new Set(desired().map(d => d.key)));
-    log(`${full} ${ver} instalat`, 'done');
-    return { ok: true, via: 'bifrost' };
-  } catch (e) { log(`${full}: ${e.message}`, 'error'); return { ok: false, error: e.message }; }
-  finally { delete installing[full]; send('installing', installing); setProgress(null); setJob(null); applyHints(); send('mods', modsPayload()); send('player', playerInfo()); }
-}
-function playerRemove(key) {
-  if (job) return { ok: false, error: 'Lucrez deja.' };
-  const pr = getProfile(), p = pr.packages[key];
-  if (!p) return { ok: false, error: 'Nu e instalat.' };
-  if (p.role === 'required') return { ok: false, error: 'Serverul are nevoie de el.' };
-  if (p.role === 'dep' && isAdmin()) return { ok: false, error: 'E o dependență - se scoate singură când scoți modul care are nevoie de ea.' };
-  if (key === BEPINEX) return { ok: false, error: 'BepInEx e baza tuturor modurilor - nu se scoate.' };
-  const users = Object.entries(pr.packages).filter(([k, x]) => k !== key && (x.deps || []).some(d => parseDep(d)?.full === key)).map(([k]) => k);
-  if (users.length) return { ok: false, error: `Au nevoie de el: ${users.join(', ')}. Scoate-le întâi pe acelea.` };
-  if (p.role === 'recommended') { delete settings.recommended[key]; delete settings.nexusChosen[key]; saveSettings(); }
-  pr.remove(key);
-  for (const k of pr.orphans()) pr.remove(k);
-  log(`${key} dezinstalat`);
-  send('mods', modsPayload()); send('player', playerInfo());
+const modsPayload = () => !srv() ? { mods: [], profileFound: false } : isAdmin() ? adminMods() : playerMods();
+function setSide(name, side) {
+  if (job) return { ok: false, error: 'O sincronizare rulează acum - încearcă după ce termină.' };
+  const st = readState(); st.mods[name] = side; writeState(st);
+  log(`${name} -> ${side}`);
+  send('mods', modsPayload());
+  watch.dirty = true; changedAt = Date.now() - Math.max(0, srv().quietSeconds - 2) * 1000; setWatch('change', 'modurile s-au schimbat...');
   return { ok: true };
 }
-// Nexus installs started from Descoperă that wait for the "Mod Manager Download" click (free accounts)
-const nexusPending = {};   // modId -> { fileId, title, version, at }
-// admin: Nexus mods go into the Thunderstore Mod Manager profile as manual mods, linked to their Nexus page so the
-// players' list carries them too
-const adminNexusProfile = () => new Profile({ dir: tmmProfileDir(), cacheDir: path.join(DATA, 'cache'), fetch: (...a) => net.fetch(...a), stateFile: path.join(DATA, 'admin-nexus.json') });
-const nexusFolder = (modId, title) => `Nexus-${modId}-${String(title || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'mod'}`;
+
+const watch = { text: '', state: 'idle', dirty: false, lastSync: null, lastResult: null, retryAt: null, twoWay: null };
+let seenSig = null, syncedSig = null, changedAt = null, failStreak = 0;
+function setWatch(state, text) { if (state) watch.state = state; if (text !== undefined) watch.text = text; send('watch', watch); updateTray(); }
+function signature() {
+  const pr = getProfile(), parts = [];
+  try { const s = fs.statSync(pr.stateFile); parts.push(`p|${s.mtimeMs}|${s.size}`); } catch { parts.push('p|none'); }
+  try { for (const e of fs.readdirSync(pluginsDir()).sort()) { try { parts.push(`${e}|${fs.statSync(path.join(pluginsDir(), e)).mtimeMs}`); } catch { } } } catch { }
+  return parts.join('\n');
+}
+
+async function confirmMass(list) {
+  if (!win) return false;
+  const r = await dialog.showMessageBox(win, {
+    type: 'warning', buttons: ['Anulează', 'Scoate-le de pe server'], defaultId: 0, cancelId: 0, title: 'Bifrost',
+    message: `S-ar scoate ${list.length} moduri de pe server`, detail: `${list.join(', ')}\n\nUn profil gol sau greșit arată exact așa. Continui?`,
+  });
+  return r.response === 1;
+}
+
+async function syncNow(reason) {
+  const s = srv();
+  if (!isAdmin() || !s.conn) return;
+  if (job) { toast('Rulează deja ceva - aștept să termine.'); return; }
+  const manual = reason === 'manual', tr = transport();
+  const sig = signature();
+  changedAt = null; watch.retryAt = null;
+  setJob({ kind: 'sync', label: `Sincronizare (${reason})`, started: Date.now() });
+  setWatch('syncing', 'sincronizez...');
+  log(`▶ Sincronizare (${reason}) → ${tr.label()}`, 'start');
+  const st = readState();
+  try {
+    const r = await syncMods(st, {
+      pluginsDir: pluginsDir(), transport: tr, builtin: new RegExp(s.builtin || 'BepInExPack', 'i'), allMods: s.syncAllMods,
+      confirmMassRemoval: manual ? confirmMass : null, log: l => log(l, 'out'),
+    });
+    writeState(st);
+    for (const n of r.newMods) log(`  ${n.name} -> ${n.side} (${n.why})`, 'out');
+    const what = [r.copy.length && `Actualizat: ${r.copy.join(', ')}`, r.remove.length && `Scos: ${r.remove.join(', ')}`,
+    r.newMods.length && `Moduri noi (ghicit): ${r.newMods.map(n => `${n.name} → ${n.side}`).join('; ')}`].filter(Boolean).join('\n');
+    log(`■ Sincronizare: ${r.copy.length} copiate, ${r.remove.length} scoase`, 'done');
+    syncedSig = sig; failStreak = 0; watch.lastSync = Date.now();
+    setJob(null);
+    await maybeRestart({ manual, what });
+  } catch (e) {
+    setJob(null);
+    if (e.code === 'MASS_REMOVAL') {
+      watch.lastResult = { kind: 'warn', text: `Oprit: ${e.message}` }; syncedSig = sig;
+      notify('Bifrost: sincronizare oprită', e.message, 'warn'); setWatch('attention', 'necesită atenție');
+    } else {
+      failStreak++;
+      watch.lastResult = { kind: 'error', text: `Eroare: ${e.message}` };
+      watch.retryAt = Date.now() + 5 * 60e3;
+      log(`■ Sincronizarea a eșuat: ${e.message}`, 'error');
+      if (failStreak === 1) notify('Bifrost: sincronizarea a eșuat', `${e.message}\nReîncerc în 5 minute.`, 'warn');
+      setWatch('error', 'eroare - reîncerc');
+    }
+  } finally { watch.dirty = signature() !== syncedSig; send('mods', modsPayload()); send('watch', watch); }
+}
+
+// restart only while nobody plays; afterwards configs + list
+async function maybeRestart({ manual, what = '', force } = {}) {
+  const s = srv(), tr = transport(), st = readState();
+  if (!st.restartPending && !force) {
+    watch.lastResult = { kind: 'ok', text: 'Serverul e la zi', what };
+    if (manual) toast('Serverul e la zi.', 'ok');
+    setWatch('idle', 'la zi');
+    schedulePublish('mods sincronizate'); setTimeout(() => twoWay('după sincronizare'), 1500);
+    return { ok: true };
+  }
+  if (!tr.canRestart) {
+    watch.lastResult = { kind: 'wait', text: 'Moduri copiate - repornește serverul din panoul hostului', what };
+    notify('Moduri copiate pe server', `${what}\nRepornește serverul din panoul hostului ca să le încarce.`.trim());
+    setWatch('waiting', 'așteaptă restart manual');
+    setTimeout(() => twoWay('după sincronizare'), 1500);
+    return { ok: true, manualRestart: true };
+  }
+  if (!force) {
+    let idle = await tr.isIdle().catch(() => null);
+    if (idle === null) idle = await steamPlayers().then(p => p === 0).catch(() => null);
+    if (idle !== true) {
+      watch.lastResult = { kind: 'wait', text: idle === false ? 'Moduri copiate - restartul așteaptă să iasă jucătorii' : 'Moduri copiate - nu știu dacă e cineva pe server, restartul îl faci tu', what };
+      watch.retryAt = idle === false ? Date.now() + s.retryMinutes * 60e3 : null;
+      notify('Moduri copiate pe server', `${what}\n${idle === false ? 'Sunt jucători online - serverul repornește când se golește.' : 'Apasă Restart server când nu e nimeni.'}`.trim());
+      setWatch('waiting', idle === false ? 'restart după ce iese lumea' : 'restart manual');
+      setTimeout(() => twoWay('după sincronizare'), 1500);
+      return { ok: true, postponed: true };
+    }
+  }
+  const r = await restartServer();
+  watch.lastResult = { kind: 'ok', text: r.joinCode ? `Server repornit - join code ${r.joinCode}` : 'Server repornit', what };
+  notify('Serverul Valheim e actualizat', `${what}\nRepornit${r.joinCode ? ` - join code ${r.joinCode}` : ''}`.trim());
+  setWatch('idle', 'la zi');
+  pollStatus(); schedulePublish('restart'); setTimeout(() => twoWay('după restart'), 1500);
+  return { ok: true, joinCode: r.joinCode };
+}
+async function restartServer() {
+  const tr = transport();
+  setJob({ kind: 'restart', label: 'Restart server', started: Date.now() });
+  log(`▶ Restart server (${tr.label()})`, 'start');
+  try {
+    let since = Math.floor(Date.now() / 1000);
+    await tr.restart();
+    const st = readState(); st.restartPending = false; writeState(st);
+    if (!tr.docker) { log('■ Server repornit', 'done'); return { ok: true }; }
+    // the valheim-server image: wait for an active join code; its join-code check sometimes crashes
+    // (NullReferenceException in OnCheckJoinCodeSuccess) and leaves a code nobody can resolve -> restart the game only
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      let code = null, bad = false;
+      for (let i = 0; i < 60 && !code && !bad; i++) {
+        await new Promise(r => setTimeout(r, 5000));
+        const out = await tr.logsSince(since).catch(() => '');
+        const m = out.match(/with join code (\d+) and IP .* is active/);
+        if (m) code = m[1]; else if (/OnCheckJoinCodeSuccess/.test(out)) bad = true;
+      }
+      if (code) { log(`■ Server pornit - join code ${code}`, 'done'); return { ok: true, joinCode: code }; }
+      if (!bad) { log('■ Server pornit (fără join code - crossplay oprit?)', 'done'); return { ok: true }; }
+      log(`  verificarea join code-ului a crăpat pe server (încercarea ${attempt}) - repornesc doar jocul`, 'out');
+      since = Math.floor(Date.now() / 1000);
+      await tr.restartGame();
+    }
+    return { ok: true };
+  } finally { setJob(null); }
+}
+
+function tick() {
+  if (!isAdmin() || !srv().conn || job) return;
+  const s = srv(), sig = signature();
+  if (sig !== seenSig) {
+    const first = seenSig === null;
+    seenSig = sig;
+    if (!first) { changedAt = Date.now(); watch.dirty = true; send('mods', modsPayload()); setWatch('change', 'modurile s-au schimbat...'); }
+    else if (syncedSig === null) syncedSig = sig;
+    return;
+  }
+  if (changedAt && sig === syncedSig) { changedAt = null; watch.dirty = false; setWatch('idle', 'la zi'); }
+  if (!s.autoSync) { if (watch.dirty && watch.state !== 'off') setWatch('off', 'auto-sync oprit - ai schimbări nesincronizate'); return; }
+  if (changedAt && Date.now() - changedAt >= s.quietSeconds * 1000) { syncNow('modurile s-au schimbat'); return; }
+  if (watch.retryAt && Date.now() >= watch.retryAt) { watch.retryAt = null; if (readState().restartPending) maybeRestart({}); else syncNow('reîncercare'); }
+}
+
+// ---------- status ----------
+let status = { reachable: null, checkedAt: null };
+let polling = false;
+const publicAddress = () => (srv()?.role === 'player' ? manifest?.server?.address : status.publicIp) || null;
+async function steamPlayers() {
+  const a = a2s.parseAddress(publicAddress() || (srv()?.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean));
+  if (!a) return null;
+  const i = await a2s.info(a.host, a.queryPort);
+  return i.players;
+}
+async function pollStatus() {
+  const s = srv();
+  if (!s || polling) return;
+  polling = true;
+  const prevCode = status.joinCode;
+  try {
+    if (s.role === 'admin' && s.conn) {
+      const tr = transport();
+      let st = await tr.status().catch(e => ({ reachable: false, error: e.message, checkedAt: Date.now() }));
+      if (!st) {
+        // no process view (plain SSH, local, FTP): the Steam query says if it is up and who plays
+        st = { reachable: true, checkedAt: Date.now(), container: 'running' };
+        try { const i = await (async () => { const a = a2s.parseAddress((s.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean)); return a ? a2s.info(a.host, a.queryPort) : null; })(); if (i) { st.players = i.players; st.gameUp = true; st.idle = i.players === 0; } }
+        catch { st.gameUp = false; }
+      }
+      status = st;
+    } else if (s.role === 'player') {
+      const sv = manifest?.server || {};
+      status = { reachable: true, checkedAt: Date.now(), container: 'running', joinCode: sv.joinCode || null, publicIp: sv.address || null, fromList: true };
+      if (sv.address) { const a = a2s.parseAddress(sv.address); try { const i = await a2s.info(a.host, a.queryPort); status.players = i.players; status.gameUp = true; } catch { } }
+    }
+  } catch (e) { status = { reachable: false, error: e.message, checkedAt: Date.now() }; }
+  polling = false;
+  send('status', status); updateTray();
+  if (s.role === 'admin' && status.joinCode && prevCode !== undefined && status.joinCode !== prevCode && !status.codeBroken) schedulePublish('join code nou');
+}
+
+// ---------- configs + mods put on the server by hand ----------
+let twoWayBusy = false;
+// which mod a config file belongs to: BepInEx names configs after the plugin GUID, and that GUID is a string inside
+// the plugin's DLL; other mods may mention it too, so the package whose name matches best wins
+async function configSides(rels) {
+  const st = readState(), pr = getProfile(), best = new Map();
+  const names = rels.map(r => r.split('/')[0].replace(/\.(cfg|ya?ml|json|txt)$/i, ''));
+  const tokens = names.map(n => n.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 3));
+  for (const [k, p] of Object.entries(pr.packages)) {
+    for (const f of (p.files || []).filter(x => /\.dll$/i.test(x))) {
+      let txt;
+      try { txt = fs.readFileSync(path.join(pr.dir, ...f.split('/'))).toString('latin1'); } catch { continue; }
+      rels.forEach((r, i) => {
+        if (names[i].length < 4 || !txt.includes(names[i])) return;
+        const score = tokens[i].filter(t => k.toLowerCase().includes(t)).length;
+        if (!best.has(r) || score > best.get(r).score) best.set(r, { key: k, score });
+      });
+      await new Promise(res => setImmediate(res));
+    }
+  }
+  return new Map([...best].map(([r, b]) => [r, st.mods[b.key] === 'client' ? 'client' : 'server']));
+}
+async function twoWay(reason) {
+  const s = srv();
+  if (!isAdmin() || !s.conn || twoWayBusy || job || !(s.syncConfigs || s.pullServerMods)) return;
+  twoWayBusy = true;
+  const tr = transport(), pr = getProfile(), res = { at: Date.now(), push: 0, pull: 0, mods: [], error: null };
+  try {
+    if (s.pullServerMods) {
+      const st = readState(), have = new Set(Object.keys(pr.packages)), builtin = new RegExp(s.builtin || 'BepInExPack', 'i');
+      const extras = (await tr.list(tr.pluginsDir)).filter(n => !have.has(n) && !st.installed.includes(n) && !builtin.test(n));
+      for (const e of extras) {
+        if (job) break;
+        const m = e.match(/^(.+?)-(\d+\.\d+\.\d+)$/), full = m ? m[1] : e, ver = m ? m[2] : null;
+        setJob({ kind: 'pull', label: `Aduc de pe server: ${e}`, started: Date.now() });
+        try {
+          if (pr.packages[full]) {
+            await tr.remove(tr.pluginsDir, [e]);
+            log(`Pe server era și ${e} (pus de mână) - îl înlocuiesc cu ${full} din profil`);
+          } else if (catalogIndex.get(full)) {
+            await installThunderstore({ key: full, full, ver: ver || catalogIndex.get(full).ver, role: 'user', title: catalogIndex.get(full).name }, new Set());
+            await tr.remove(tr.pluginsDir, [e]);
+            log(`Adus de pe server: ${full} ${ver || ''} (din Thunderstore)`, 'done');
+          } else {
+            const tmp = path.join(DATA, 'cache', 'tmp', `srv-${Date.now()}`);
+            for (const f of await tr.pull(tr.pluginsDir, e)) { const p = path.join(tmp, ...f.name.split('/')); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, f.data); }
+            pr.importManual(e, path.join(tmp, e), { ver: '', role: 'user', source: 'manual', title: e });
+            fs.rmSync(tmp, { recursive: true, force: true });
+            log(`Adus de pe server: ${e} (manual)`, 'done');
+          }
+          res.mods.push(full);
+        } finally { setJob(null); }
+      }
+      if (res.mods.length) {
+        const st2 = readState(); for (const n of res.mods) st2.mods[n] = 'server'; writeState(st2);
+        notify('Moduri aduse de pe server', res.mods.join(', '));
+        send('mods', modsPayload());
+      }
+    }
+    if (s.syncConfigs) {
+      const cacheFile = path.join(serverDir(s.id), 'remote-cache.json'), cache = readJson(cacheFile, {});
+      const r = await syncConfigs({ transport: tr, configDir: configDir(), stateFile: path.join(serverDir(s.id), 'config-sync.json'), sideOf: configSides, cache });
+      if (tr.hashless) writeJson(cacheFile, cache);
+      res.push = r.push.length; res.pull = r.pull.length;
+      if (r.push.length) log(`Configurări trimise pe server (${reason}): ${r.push.join(', ')}`, 'done');
+      if (r.pull.length) log(`Configurări aduse de pe server (${reason}): ${r.pull.join(', ')}`, 'done');
+    }
+  } catch (e) { res.error = e.message; log(`Sincronizarea configurărilor: ${e.message}`, 'error'); }
+  finally { twoWayBusy = false; watch.twoWay = res; send('watch', watch); }
+}
+
+// ---------- the list players read ----------
+const listState = { at: null, ok: null, error: null, changed: null, busy: false };
+let publishTimer = null;
+function schedulePublish(reason) {
+  const s = srv();
+  if (!isAdmin() || !s.autoPublish) return;
+  clearTimeout(publishTimer);
+  publishTimer = setTimeout(() => publishList(reason), 4000);
+}
+function buildList() {
+  const s = srv();
+  return buildServerList({
+    mods: adminMods().mods, nexusLinks: s.nexusLinks,
+    server: { name: s.name, world: s.world, joinCode: status.codeBroken ? null : status.joinCode || null, joinCodeAt: status.joinCodeAt || null, address: s.publishAddress ? status.publicIp || null : null },
+  });
+}
+let ghCliToken = undefined;
+async function githubToken() {
+  const t = dec(G.githubTokenEnc);
+  if (t) return t;
+  if (ghCliToken === undefined) ghCliToken = await new Promise(res => execFile('gh', ['auth', 'token'], { windowsHide: true }, (e, out) => res(e ? null : out.trim() || null)));
+  return ghCliToken;
+}
+async function publishList(reason) {
+  const s = srv();
+  if (!isAdmin() || listState.busy) return { ok: false, error: 'ocupat' };
+  const list = { ...buildList(), updatedAt: Date.now() };
+  if (!list.required.length) { listState.error = 'Profilul nu are moduri de server - nu public lista.'; send('list', listState); return { ok: false, error: listState.error }; }
+  if (readState().restartPending) { listState.error = 'Serverul nu a repornit încă cu modurile noi - public după restart.'; send('list', listState); return { ok: false, error: listState.error }; }
+  const token = await githubToken();
+  if (!token) { listState.error = 'Conectează-te la GitHub (Setări → GitHub) ca să public lista.'; send('list', listState); return { ok: false, error: listState.error }; }
+  listState.busy = true; send('list', listState);
+  try {
+    const r = await listhost.publish(fetchN, token, s.list || { kind: 'gist' }, list, reason);
+    if (!s.list || r.src.id !== s.list.id) { s.list = r.src; saveSettings(); send('settings', publicSettings()); }
+    Object.assign(listState, { at: Date.now(), ok: true, error: null, changed: r.changed });
+    if (r.changed) log(`Lista pentru prieteni publicată (${reason}): ${list.required.length} obligatorii, ${list.recommended.length} recomandate`, 'done');
+    return { ok: true, changed: r.changed, invite: listhost.inviteLink(s.list, JOIN_PAGE) };
+  } catch (e) {
+    Object.assign(listState, { at: Date.now(), ok: false, error: e.message });
+    log(`Lista pentru prieteni nu s-a publicat: ${e.message}`, 'error');
+    return { ok: false, error: e.message };
+  } finally { listState.busy = false; send('list', listState); }
+}
+
+// ---------- modpack (Thunderstore package that depends on the server's mods, for people without Bifrost) ----------
+const modpackDir = () => path.join(serverDir(srv().id), 'modpack');
+function modpackInfo() {
+  const s = srv();
+  if (!s || !isAdmin() || !s.modpackName) return { configured: false };
+  const man = readJson(path.join(modpackDir(), 'manifest.json'), null);
+  const prof = adminMods().mods.filter(m => !m.manual && !m.modpack);
+  const inPack = {};
+  for (const d of (man?.dependencies || [])) { const m = parseDep(d); if (m) inPack[m.full] = m.ver; }
+  const added = [], changed = [], removed = [];
+  for (const m of prof) {
+    if (!(m.name in inPack)) added.push({ name: m.name, to: m.version });
+    else if (inPack[m.name] !== m.version) changed.push({ name: m.name, from: inPack[m.name], to: m.version });
+  }
+  const names = new Set(prof.map(m => m.name));
+  for (const n of Object.keys(inPack)) if (!names.has(n)) removed.push({ name: n, from: inPack[n] });
+  const local = man?.version_number || null;
+  const zip = local && path.join(modpackDir(), `${s.modpackName}-${local}.zip`);
+  return {
+    configured: true, name: ownPack(), local, published: updates[ownPack()]?.latest || null, count: Object.keys(inPack).length,
+    added, changed, removed, hasToken: !!s.tsTokenEnc, zip: zip && fs.existsSync(zip) ? zip : null, url: `${TS}/c/valheim/p/${s.modpackTeam}/${s.modpackName}/`,
+  };
+}
+async function buildModpack() {
+  const s = srv(), dir = modpackDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const deps = adminMods().mods.filter(m => !m.manual && !m.modpack).map(m => `${m.name}-${m.version}`);
+  const old = readJson(path.join(dir, 'manifest.json'), null);
+  let version = '1.0.0';
+  if (old) { const [a, b, c] = old.version_number.split('.').map(Number); version = `${a}.${b}.${c + 1}`; }
+  const published = updates[ownPack()]?.latest;
+  if (published && cmpVer(published, version) >= 0) { const [a, b, c] = published.split('.').map(Number); version = `${a}.${b}.${c + 1}`; }
+  const manifestJson = { name: s.modpackName, version_number: version, website_url: '', description: `Mods for the ${s.name} Valheim server.`.slice(0, 250), dependencies: deps };
+  const stage = path.join(dir, 'stage');
+  fs.rmSync(stage, { recursive: true, force: true }); fs.mkdirSync(stage);
+  fs.writeFileSync(path.join(stage, 'manifest.json'), JSON.stringify(manifestJson, null, 2));
+  fs.writeFileSync(path.join(stage, 'README.md'), `# ${s.modpackName}\n\nAll the mods of the **${s.name}** Valheim server.\n\n## Mods (${deps.length})\n${deps.map(d => `- ${d}`).join('\n')}\n`);
+  fs.copyFileSync(path.join(__dirname, 'ui', 'app.png'), path.join(stage, 'icon.png'));
+  const zip = path.join(dir, `${s.modpackName}-${version}.zip`);
+  fs.rmSync(zip, { force: true });
+  await run7z(['a', '-tzip', zip, 'manifest.json', 'README.md', 'icon.png'], stage);
+  fs.copyFileSync(path.join(stage, 'manifest.json'), path.join(dir, 'manifest.json'));
+  fs.rmSync(stage, { recursive: true, force: true });
+  log(`Modpack ${s.modpackName} ${version}: ${deps.length} moduri`, 'done');
+  send('modpack', modpackInfo());
+  return { ok: true, info: modpackInfo() };
+}
+async function tsApi(token, method, p, body) {
+  const r = await fetchN(`${TS}${p}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const text = await r.text();
+  let j = null; try { j = JSON.parse(text); } catch { }
+  if (!r.ok) throw new Error(`${method} ${p}: HTTP ${r.status} ${text.slice(0, 300)}`);
+  return j;
+}
+async function publishModpack() {
+  const s = srv(), token = dec(s.tsTokenEnc);
+  if (!token) return { ok: false, error: 'Lipsește tokenul Thunderstore (Setări).' };
+  const b = await buildModpack();
+  const zip = b.info.zip;
+  if (!zip) return { ok: false, error: 'Nu găsesc zip-ul construit.' };
+  setJob({ kind: 'publish', label: `Public ${path.basename(zip)}`, started: Date.now() });
+  let uuid = null;
+  try {
+    const data = fs.readFileSync(zip);
+    const init = await tsApi(token, 'POST', '/api/experimental/usermedia/initiate-upload/', { filename: path.basename(zip), file_size_bytes: data.length });
+    uuid = init.user_media.uuid;
+    const parts = [];
+    for (const u of init.upload_urls) {
+      const chunk = data.subarray(u.offset, u.offset + u.length);
+      const r = await fetchN(u.url, { method: 'PUT', body: chunk, headers: { 'Content-MD5': crypto.createHash('md5').update(chunk).digest('base64') } });
+      const etag = r.headers.get('etag');
+      if (!r.ok || !etag) throw new Error(`upload partea ${u.part_number}: HTTP ${r.status}`);
+      parts.push({ ETag: etag, PartNumber: u.part_number });
+    }
+    await tsApi(token, 'POST', `/api/experimental/usermedia/${uuid}/finish-upload/`, { parts });
+    let cats = [];
+    try { const c = await tsApi(token, 'GET', '/api/experimental/community/valheim/category/'); const hit = (c.results || []).find(x => /modpack/i.test(x.slug) || /modpack/i.test(x.name)); if (hit) cats = [hit.slug]; } catch { }
+    const res = await tsApi(token, 'POST', '/api/experimental/submission/submit/', { author_name: s.modpackTeam, communities: ['valheim'], community_categories: { valheim: cats }, categories: [], has_nsfw_content: false, upload_uuid: uuid });
+    const v = res?.package_version?.version_number || b.info.local;
+    log(`■ Publicat ${s.modpackName} ${v}`, 'done');
+    updates[ownPack()] = { latest: v };
+    return { ok: true, version: v };
+  } catch (e) {
+    if (uuid) { try { await tsApi(token, 'POST', `/api/experimental/usermedia/${uuid}/abort-upload/`, {}); } catch { } }
+    log(`■ Publicarea a eșuat: ${e.message}`, 'error');
+    return { ok: false, error: e.message };
+  } finally { setJob(null); send('modpack', modpackInfo()); }
+}
+
+// =====================================================================================================
+// SERVERS: add (invite), create (admin), import, switch, remove
+// =====================================================================================================
+function uniqueId(name) { let id = slug(name), i = 2; while (G.servers.some(s => s.id === id)) id = `${slug(name)}-${i++}`; return id; }
+function activate(id) {
+  G.activeServer = id; saveSettings();
+  profile = null; seenSig = null; syncedSig = null; changedAt = null; status = { reachable: null };
+  Object.assign(watch, { text: '', state: 'idle', dirty: false, lastSync: null, lastResult: null, retryAt: null, twoWay: null });
+  Object.assign(listState, { at: null, ok: null, error: null, changed: null, busy: false });
+  loadManifestCache(); indexCatalog();
+  if (win) win.webContents.reload();
+  setTimeout(() => { pollStatus(); if (srv()?.role === 'player') refreshManifest(); }, 1500);
+}
+async function addServer(invite) {
+  const src = listhost.parseInvite(invite);
+  if (!src) return { ok: false, error: 'Nu recunosc invitația - lipește linkul sau codul primit (ex. g.1a2b3c...).' };
+  const existing = G.servers.find(s => JSON.stringify(s.list) === JSON.stringify(src));
+  if (existing) { activate(existing.id); return { ok: true, id: existing.id, existed: true }; }
+  let m;
+  try { m = await listhost.fetchList(fetchN, src); } catch (e) { return { ok: false, error: `Nu pot citi lista serverului: ${e.message}` }; }
+  const name = m.server?.name || 'Server';
+  const id = uniqueId(name);
+  G.servers.push({ ...SERVER_DEFAULTS, id, name, role: 'player', list: src, profileDir: path.join(DATA, 'profiles', id), createdAt: Date.now() });
+  writeJson(path.join(serverDir(id), 'list-cache.json'), m);
+  saveSettings();
+  log(`Server adăugat: ${name} (${listhost.inviteCode(src)})`, 'done');
+  activate(id);
+  return { ok: true, id, name, required: m.required.length };
+}
+// cfg: { name, world, conn, secret, builtin, source: { kind: 'empty'|'local'|'code'|'server', dir, code }, list: { kind: 'gist'|'github', repo } }
+async function createServer(cfg) {
+  if (job) return { ok: false, error: 'Lucrez deja.' };
+  const id = uniqueId(cfg.name);
+  const s = {
+    ...SERVER_DEFAULTS, id, name: cfg.name || 'Server', role: cfg.personal ? 'player' : 'admin', world: cfg.world || '', createdAt: Date.now(),
+    profileDir: path.join(DATA, 'profiles', id), conn: cfg.conn || null, connSecretEnc: cfg.secret ? enc(cfg.secret) : null,
+    builtin: cfg.builtin || (cfg.conn?.type === 'ssh-docker' ? 'ValheimPlus|BepInExPack' : 'BepInExPack'),
+    list: cfg.list?.kind === 'github' && cfg.list.repo ? { kind: 'github', repo: cfg.list.repo, path: 'server.json' } : null,
+  };
+  G.servers.push(s); saveSettings();
+  G.activeServer = id; profile = null;
+  log(`Server nou: ${s.name} (${s.conn ? s.conn.type : 'fără conexiune'})`, 'done');
+  const r = await importInto(cfg.source || { kind: 'empty' });
+  activate(id);
+  if (r.ok && s.conn) setTimeout(() => syncNow('server nou'), 4000);
+  return { ...r, id };
+}
+// fill the current profile: other mod managers, a profile code or what the server already runs
+async function importInto(source) {
+  if (source.kind === 'empty') {
+    await installThunderstore({ key: BEPINEX, full: BEPINEX, ver: catalogIndex.get(BEPINEX)?.ver || '5.4.2351', role: 'user', title: 'BepInExPack Valheim' }, new Set()).catch(e => log(e.message, 'error'));
+    return { ok: true, count: Object.keys(getProfile().packages).length };
+  }
+  setJob({ kind: 'import', label: 'Import moduri', started: Date.now() });
+  const pr = getProfile();
+  try {
+    let mods = [], manual = [], configs = null;
+    if (source.kind === 'local') {
+      const p = importers.readProfileMods(source.dir);
+      mods = p.mods; manual = p.manual.map(n => ({ name: n, abs: path.join(p.pluginsDir, n) })); configs = { dir: p.configDir };
+    } else if (source.kind === 'code') {
+      const p = await tsprofile.importCode(fetchN, source.code);
+      mods = p.mods.map(m => ({ ...m, ver: m.ver || catalogIndex.get(m.full)?.ver })).filter(m => m.ver); configs = { files: p.configs };
+    } else if (source.kind === 'server') {
+      // a server's plugin folders: Thunderstore copies carry manifest.json; the rest comes over as manual mods
+      const tr = transport(), st = readState();
+      const builtin = new RegExp(srv().builtin || 'BepInExPack', 'i');
+      for (const n of (await tr.list(tr.pluginsDir)).filter(x => !builtin.test(x))) {
+        let man = null;
+        try { man = JSON.parse((await tr.read(tr.pluginsDir, `${n}/manifest.json`)).toString('utf8').replace(/^﻿/, '')); } catch { }
+        const base = n.replace(/-\d+\.\d+\.\d+$/, '');
+        const full = man?.name && base.endsWith(man.name) ? base : catalogIndex.has(base) ? base : null;
+        if (full && (man?.version_number || catalogIndex.get(full))) mods.push({ full, ver: man?.version_number || catalogIndex.get(full).ver, title: full, serverFolder: n });
+        else manual.push({ name: n, server: true });
+        st.mods[full || n] = 'server';
+      }
+      writeState(st);
+      if (!mods.some(m => m.full === BEPINEX)) mods.unshift({ full: BEPINEX, ver: catalogIndex.get(BEPINEX)?.ver || '5.4.2351', title: 'BepInExPack Valheim' });
+    }
+    const names = new Set(mods.map(m => m.full));
+    setProgress({ phase: 'install', text: '', done: 0, total: mods.length + manual.length });
+    for (const [i, m] of mods.sort((a, b) => (b.full === BEPINEX) - (a.full === BEPINEX)).entries()) {
+      setProgress({ ...progress, done: i });
+      try { await installThunderstore({ key: m.full, full: m.full, ver: m.ver, role: 'user', title: m.title || m.full }, names); }
+      catch (e) { log(`  ${m.full} ${m.ver}: ${e.message}`, 'error'); }
+    }
+    for (const m of manual) {
+      if (m.server) {
+        const tmp = path.join(DATA, 'cache', 'tmp', `srv-${Date.now()}`);
+        for (const f of await transport().pull(transport().pluginsDir, m.name)) { const p = path.join(tmp, ...f.name.split('/')); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, f.data); }
+        pr.importManual(m.name, path.join(tmp, m.name), { ver: '', role: 'user', source: 'manual', title: m.name });
+        fs.rmSync(tmp, { recursive: true, force: true });
+      } else pr.importManual(m.name, m.abs, { ver: '', role: 'user', source: 'manual', title: m.name });
+      log(`  copiat ${m.name} (manual)`, 'out');
+    }
+    if (configs?.dir && fs.existsSync(configs.dir)) fs.cpSync(configs.dir, configDir(), { recursive: true, force: true });
+    if (configs?.files) for (const f of configs.files) { const p = path.join(configDir(), ...f.rel.split('/')); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, f.data); }
+    log(`■ Import gata: ${Object.keys(pr.packages).length} pachete`, 'done');
+    return { ok: true, count: Object.keys(pr.packages).length };
+  } catch (e) { log(`■ Importul a eșuat: ${e.message}`, 'error'); return { ok: false, error: e.message }; }
+  finally { setProgress(null); setJob(null); afterProfileChange(); }
+}
+function removeServer(id) {
+  const s = G.servers.find(x => x.id === id);
+  if (!s) return { ok: false, error: 'nu există' };
+  if (job) return { ok: false, error: 'Lucrez deja.' };
+  G.servers = G.servers.filter(x => x.id !== id);
+  // its profile and data; the shared download cache stays
+  for (const d of [s.profileDir, serverDir(id)]) { try { if (d && d.startsWith(DATA)) fs.rmSync(d, { recursive: true, force: true }); } catch { } }
+  log(`Server șters: ${s.name}`);
+  activate(G.activeServer === id ? (G.servers[0]?.id || null) : G.activeServer);
+  return { ok: true };
+}
+
+// =====================================================================================================
+// NEXUS (shared)
+// =====================================================================================================
 async function nexusInstallNow(e, nxm) {
   setJob({ kind: 'nexus', label: `Instalez ${e.title} (Nexus)`, started: Date.now() });
   log(`▶ ${job.label}`, 'start');
   try {
     setProgress({ phase: 'install', text: e.title, done: 0, total: 1 });
-    if (isAdmin() && !ownSource()) {
-      const folder = nexusFolder(e.modId, e.title);
-      await installNexus({ key: folder, ver: String(e.version || e.fileId), role: 'user', title: e.title, modId: e.modId, fileId: e.fileId }, nxm, adminNexusProfile());
-      settings.nexusLinks[folder] = { modId: e.modId, fileId: e.fileId, version: e.version || '', title: e.title, fileName: e.fileName || '' };
-      saveSettings();
-      log(`■ ${e.title} instalat în profilul Thunderstore (${folder}) - alege Server/Client la Moduri`, 'done');
-    } else {
-      await installNexus({ key: `nexus-${e.modId}`, full: `nexus-${e.modId}`, ver: String(e.version || e.fileId), role: e.role || 'user', title: e.title, modId: e.modId, fileId: e.fileId }, nxm);
-      log(`■ ${e.title} instalat`, 'done');
-    }
+    await installNexus({ key: `nexus-${e.modId}`, full: `nexus-${e.modId}`, ver: String(e.version || e.fileId), role: e.role || 'user', title: e.title, modId: e.modId, fileId: e.fileId }, nxm);
+    if (e.role === 'recommended') { srv().nexusChosen[`nexus-${e.modId}`] = true; saveSettings(); }
     delete nexusPending[e.modId];
+    nexusWaiting = nexusWaiting.filter(n => n.modId !== e.modId);
+    log(`■ ${e.title} instalat`, 'done');
     notify('Instalat de pe Nexus', e.title);
     return { ok: true };
   } catch (err) { log(`■ Nexus: ${err.message}`, 'error'); return { ok: false, error: err.message }; }
-  finally { setProgress(null); setJob(null); send('nexusPending', nexusPending); send('mods', modsPayload()); if (!isAdmin()) send('player', playerInfo()); }
+  finally { setProgress(null); setJob(null); send('nexusPending', nexusPending); afterProfileChange(); }
 }
 async function nexusInstall({ modId, fileId, title, version, fileName }) {
-  if (!dec(settings.nexusKeyEnc)) return { ok: false, error: 'Pune întâi cheia ta Nexus în Setări → Nexus Mods.', needKey: true };
+  if (!srv()) return { ok: false, error: 'Adaugă sau creează întâi un server.' };
+  if (!dec(G.nexusKeyEnc)) return { ok: false, error: 'Pune întâi cheia ta Nexus în Setări → Nexus Mods.', needKey: true };
   if (!fileId) {
     const f = Nexus.pickMain(await nexus.modFiles(modId));
     if (!f) return { ok: false, error: 'Modul nu are fișiere de descărcat.' };
     fileId = f.fileId; version = version || f.version;
   }
   const e = { modId: +modId, fileId: +fileId, title, version, fileName };
-  if (settings.nexusUser?.premium) { if (job) return { ok: false, error: 'Lucrez deja.' }; return nexusInstallNow(e); }
+  if (G.nexusUser?.premium) { if (job) return { ok: false, error: 'Lucrez deja.' }; return nexusInstallNow(e); }
   nexusPending[e.modId] = { ...e, at: Date.now() };
   send('nexusPending', nexusPending);
   shell.openExternal(Nexus.filesPage(e.modId, e.fileId));
   return { ok: true, waiting: true };
 }
-
-// nxm:// from the Nexus site ("Mod Manager Download")
-async function handleNxm(url) {
-  const x = Nexus.parseNxm(url);
+async function handleLink(url) {
   showWindow();
+  if (/^bifrost:\/\//i.test(url)) {
+    const r = await addServer(url);
+    toast(r.ok ? (r.existed ? 'Serverul era deja adăugat.' : `Server adăugat: ${r.name}. Apasă JOACĂ.`) : r.error, r.ok ? 'ok' : 'error');
+    return;
+  }
+  const x = Nexus.parseNxm(url);
   if (!x) return toast('Link Nexus nevalid.', 'error');
   if (x.game !== 'valheim') return toast(`Linkul e pentru ${x.game}, nu Valheim.`, 'error');
   if (job) return toast('Lucrez deja - apasă din nou după ce termin.', 'error');
+  if (!srv()) return toast('Adaugă sau creează întâi un server.', 'error');
   const pend = nexusPending[x.modId];
-  if (isAdmin() || (pend && !nexusWaiting.find(n => n.modId === x.modId))) {
-    let e = pend ? { ...pend, fileId: x.fileId } : null;
-    if (!e) { const m = await nexus.modInfo(x.modId).catch(() => null); e = { modId: x.modId, fileId: x.fileId, title: m?.name || `Nexus ${x.modId}`, version: m?.version || '' }; }
-    const r = await nexusInstallNow(e, x);
-    toast(r.ok ? `${e.title} instalat.` : r.error, r.ok ? 'ok' : 'error');
-    return;
-  }
-  let entry = nexusWaiting.find(n => n.modId === x.modId) || (manifest?.nexus || []).filter(n => n.modId === x.modId).map(n => ({
-    key: n.key, full: n.key, ver: String(n.version || n.fileId), role: n.required ? 'required' : 'recommended', title: n.title, modId: n.modId, fileId: n.fileId,
-  }))[0];
-  setJob({ kind: 'nexus', label: 'Instalez de pe Nexus', started: Date.now() });
-  try {
-    nexus.key = dec(settings.nexusKeyEnc);
-    if (!nexus.key) throw new Error('Pune cheia Nexus în Setări, apoi apasă din nou pe site.');
-    if (!entry) {
-      const m = await nexus.mod(x.modId).catch(() => null);
-      entry = { key: `nexus-${x.modId}`, full: `nexus-${x.modId}`, ver: String(x.fileId), role: 'user', title: m?.name || `Nexus ${x.modId}`, modId: x.modId, fileId: x.fileId };
-    }
-    entry = { ...entry, fileId: x.fileId };
-    setProgress({ phase: 'install', text: entry.title, done: 0, total: 1 });
-    await installNexus(entry, x);
-    if (entry.role === 'recommended') { settings.nexusChosen[entry.key] = true; saveSettings(); }
-    nexusWaiting = nexusWaiting.filter(n => n.modId !== x.modId);
-    toast(`${entry.title} instalat.`, 'ok');
-    if (nexusWaiting.length) shell.openExternal(Nexus.filesPage(nexusWaiting[0].modId, nexusWaiting[0].fileId));
-  } catch (e) { toast(e.message, 'error'); log(`Nexus: ${e.message}`, 'error'); }
-  finally { setProgress(null); setJob(null); send('mods', modsPayload()); send('player', playerInfo()); }
-}
-function registerNxm() {
-  try {
-    if (app.isPackaged) app.setAsDefaultProtocolClient('nxm');
-    else app.setAsDefaultProtocolClient('nxm', process.execPath, [path.resolve(__dirname)]);
-  } catch (e) { log(`nxm: ${e.message}`); }
+  const want = nexusWaiting.find(n => n.modId === x.modId) || (manifest?.nexus || []).filter(n => n.modId === x.modId)
+    .map(n => ({ modId: n.modId, title: n.title, version: n.version, role: n.required ? 'required' : 'recommended' }))[0];
+  let e = pend ? { ...pend } : want ? { ...want } : null;
+  if (!e) { const m = await nexus.modInfo(x.modId).catch(() => null); e = { modId: x.modId, title: m?.name || `Nexus ${x.modId}`, version: m?.version || '' }; }
+  e.fileId = x.fileId;
+  const r = await nexusInstallNow(e, x);
+  toast(r.ok ? `${e.title} instalat.` : r.error, r.ok ? 'ok' : 'error');
+  if (r.ok && nexusWaiting.length) shell.openExternal(Nexus.filesPage(nexusWaiting[0].modId, nexusWaiting[0].fileId));
 }
 
-// ---------- app updates (installed build only) ----------
+// =====================================================================================================
+// APP UPDATES (code bundles, see lib/codeupdate.js)
+// =====================================================================================================
 let appUpdate = null;
-function setupUpdater() {
-  if (!app.isPackaged) return;
-  const { autoUpdater } = require('electron-updater');
-  autoUpdater.autoDownload = true;
-  autoUpdater.on('update-available', i => { appUpdate = { version: i.version, ready: false }; send('appUpdate', appUpdate); });
-  autoUpdater.on('update-downloaded', i => {
-    appUpdate = { version: i.version, ready: true }; send('appUpdate', appUpdate);
-    notify('Bifrost', `Versiunea ${i.version} e gata - se instalează la repornire.`);
-  });
-  autoUpdater.on('error', e => log(`update: ${e.message}`));
-  const check = () => autoUpdater.checkForUpdates().catch(e => log(`update: ${e.message}`));
-  setTimeout(check, 10000); setInterval(check, 4 * 3600e3);
-  ipcMain.handle('installUpdate', () => { quitting = true; autoUpdater.quitAndInstall(); });
+async function checkAppUpdate() {
+  try {
+    const r = await codeupdate.check({ fetch: fetchN, repo: REPO, current: OWN_VERSION, electronMajor: ELECTRON_MAJOR });
+    if (!r.newer) return;
+    if (r.needsInstaller || !app.isPackaged) { appUpdate = { version: r.latest, ready: false, installer: true, page: r.page }; send('appUpdate', appUpdate); return; }
+    if (appUpdate?.ready && appUpdate.version === r.latest) return;
+    appUpdate = { version: r.latest, ready: false }; send('appUpdate', appUpdate);
+    await codeupdate.install({ download: (u, f, size) => new Profile({ dir: path.join(DATA, 'app'), cacheDir: path.join(DATA, 'app'), fetch: fetchN }).download(u, f, null, size), appData: app.getPath('appData'), version: r.latest, bundle: r.bundle, electronMajor: ELECTRON_MAJOR });
+    appUpdate = { version: r.latest, ready: true }; send('appUpdate', appUpdate);
+    log(`Bifrost ${r.latest} descărcat - se folosește la următoarea pornire`, 'done');
+    notify('Bifrost', `Versiunea ${r.latest} e gata - repornește Bifrost ca s-o folosești.`);
+  } catch (e) { log(`update: ${e.message}`); }
 }
 
-// ---------- IPC ----------
+// =====================================================================================================
+// IPC
+// =====================================================================================================
 ipcMain.handle('init', () => ({
   settings: publicSettings(), profile: modsPayload(), status, job, watch, installing, catalogFetched: catalog?.fetched || null,
-  log: logTail.slice(-400), updates, modpack: modpackInfo(), list: listState, player: playerInfo(), appUpdate,
-  version: app.getVersion(),
+  log: logTail.slice(-400), updates, modpack: modpackInfo(), list: listState, player: playerInfo(), appUpdate, version: OWN_VERSION,
 }));
-const SETTABLE = ['autoSync', 'startWithWindows', 'notifications', 'quietSeconds', 'retryMinutes', 'server', 'container', 'profile',
-  'manifestRepo', 'autoPublish', 'publishAddress', 'syncConfigs', 'syncAllMods', 'pullServerMods', 'serverName', 'serverWorld', 'gameDir', 'adminFolder', 'addresses'];
 ipcMain.handle('action', (_e, name, arg) => action(name, arg));
+ipcMain.handle('installUpdate', () => { quitting = true; app.relaunch(); app.quit(); });
+const SERVER_SETTABLE = { serverName: 'name', serverWorld: 'world', addresses: 'addresses', autoSync: 'autoSync', quietSeconds: 'quietSeconds', retryMinutes: 'retryMinutes',
+  syncConfigs: 'syncConfigs', syncAllMods: 'syncAllMods', pullServerMods: 'pullServerMods', autoPublish: 'autoPublish', publishAddress: 'publishAddress', builtin: 'builtin', modpackTeam: 'modpackTeam', modpackName: 'modpackName' };
+const GLOBAL_SETTABLE = ['startWithWindows', 'notifications', 'gameDir', 'lang'];
 async function action(name, arg) {
+  const s = srv();
   switch (name) {
+    // ----- servers -----
+    case 'addServer': return addServer(arg);
+    case 'createServer': return createServer(arg);
+    case 'switchServer': if (G.servers.some(x => x.id === arg)) activate(arg); return { ok: true };
+    case 'removeServer': return removeServer(arg);
+    case 'localProfiles': return { ok: true, profiles: importers.localProfiles(app.getPath('appData')) };
+    case 'testConnection': {
+      try { const tr = makeTransport(arg.conn, arg.secret || dec(s?.connSecretEnc)); const r = await tr.test(); let mods = null; try { mods = (await tr.list(tr.pluginsDir)).length; } catch { } return { ok: true, ...r, mods }; }
+      catch (e) { return { ok: false, error: e.message }; }
+    }
+    case 'setConnection': {
+      if (!isAdmin()) return { ok: false };
+      s.conn = arg.conn; if (arg.secret !== undefined) s.connSecretEnc = arg.secret ? enc(arg.secret) : null;
+      if (arg.builtin !== undefined) s.builtin = arg.builtin;
+      saveSettings(); send('settings', publicSettings()); pollStatus(); return { ok: true };
+    }
+    case 'importInto': { const r = await importInto(arg); if (r.ok && isAdmin()) setTimeout(() => syncNow('import'), 3000); return r; }
+    case 'exportCode': {
+      if (!s) return { ok: false };
+      try {
+        const mods = Object.entries(getProfile().packages).filter(([, x]) => x.source === 'thunderstore').map(([k, x]) => ({ full: k, ver: x.ver }));
+        const code = await tsprofile.exportCode(fetchN, { name: s.name, mods, configDir: arg?.configs ? configDir() : null, sevenZip: run7z });
+        return { ok: true, code };
+      } catch (e) { return { ok: false, error: e.message }; }
+    }
     // ----- admin -----
     case 'sync': syncNow('manual'); return { ok: true };
     case 'dryrun': {
-      const { code, lines, busy } = await runSync('dryrun', 'Verific diferențele (dry run)', ['-Auto', '-DryRun']);
-      if (busy) return { ok: false, error: 'Rulează deja ceva.' };
-      const r = summarize(lines);
-      return { ok: code === 0, toCopy: r.toCopy, toRemove: r.toRemove, error: code === 0 ? null : r.error };
+      if (!s?.conn) return { ok: false, error: 'Serverul nu are conexiune.' };
+      try {
+        const st = readState();
+        const r = await syncMods(st, { pluginsDir: pluginsDir(), transport: transport(), builtin: new RegExp(s.builtin || 'BepInExPack', 'i'), allMods: s.syncAllMods, dryRun: true });
+        return { ok: true, toCopy: r.copy.join(', ') || '-', toRemove: r.remove.join(', ') || '-' };
+      } catch (e) { return { ok: false, error: e.message }; }
     }
-    case 'restart': {
-      const { code, lines, busy } = await runSync('restart', 'Restart server', ['-RestartOnly']);
-      if (busy) return { ok: false, error: 'Rulează deja ceva.' };
-      const r = summarize(lines); pollStatus(); send('mods', modsPayload());
-      if (code === 0) { watch.retryAt = null; watch.lastResult = { kind: 'ok', text: r.joinCode ? `Server repornit - join code ${r.joinCode}` : 'Server repornit' }; setWatch('idle', 'la zi'); schedulePublish('restart'); }
-      return { ok: code === 0, joinCode: r.joinCode, error: code === 0 ? null : r.error };
-    }
-    case 'fixcode': {
-      const { code, lines } = await runProcess('fixcode', 'Repornesc doar jocul (join code nou)', 'ssh',
-        ['-o', 'BatchMode=yes', settings.server, `docker exec ${settings.container} supervisorctl restart valheim-server`]);
-      setTimeout(pollStatus, 20000); setTimeout(pollStatus, 60000);
-      return { ok: code === 0, error: code === 0 ? null : lines.join(' ') };
-    }
-    case 'startServer': {
-      const { code, lines } = await runProcess('start', 'Pornesc containerul Valheim', 'ssh',
-        ['-o', 'BatchMode=yes', settings.server, 'cd ~/Games/valheim && docker compose up -d']);
-      setTimeout(pollStatus, 5000);
-      return { ok: code === 0, error: code === 0 ? null : lines.join(' ') };
-    }
+    case 'restart': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, force: true }); } catch (e) { return { ok: false, error: e.message }; }
+    case 'fixcode': try { await transport().restartGame(); setTimeout(pollStatus, 20000); setTimeout(pollStatus, 60000); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
+    case 'startServer': try { await transport().ssh(`cd ~ && docker start ${s.conn.container}`); setTimeout(pollStatus, 5000); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
     case 'setSide': return setSide(arg.name, arg.side);
     case 'refresh': pollStatus(); send('mods', modsPayload()); return { ok: true };
     case 'publishList': return publishList('manual');
     case 'twoWay': await twoWay('manual'); return { ok: !watch.twoWay?.error, ...(watch.twoWay || {}) };
-    case 'previewList': return { ok: true, list: buildList() };
     case 'nexusLink': {
-      // admin: tie a manually installed mod to its Nexus page so players can get it
-      if (!arg.url) { delete settings.nexusLinks[arg.name]; saveSettings(); send('mods', modsPayload()); return { ok: true }; }
+      if (!arg.url) { delete s.nexusLinks[arg.name]; saveSettings(); send('mods', modsPayload()); return { ok: true }; }
       const modId = Nexus.parseModUrl(arg.url);
       if (!modId) return { ok: false, error: 'Lipește linkul paginii Nexus (nexusmods.com/valheim/mods/...).' };
-      nexus.key = dec(settings.nexusKeyEnc);
-      if (!nexus.key) return { ok: false, error: 'Pune întâi cheia ta Nexus în Setări.' };
       try {
-        const [m, f] = await Promise.all([nexus.mod(modId), nexus.mainFile(modId)]);
-        settings.nexusLinks[arg.name] = { modId, fileId: f.file_id, fileName: f.file_name, version: f.version || m.version, title: m.name };
+        const [m, files] = await Promise.all([nexus.modInfo(modId), nexus.modFiles(modId)]);
+        const f = Nexus.pickMain(files);
+        if (!f) return { ok: false, error: 'Modul nu are fișiere.' };
+        s.nexusLinks[arg.name] = { modId, fileId: f.fileId, fileName: f.name, version: f.version || m?.version, title: m?.name || f.name };
         saveSettings(); send('mods', modsPayload()); schedulePublish('legătură Nexus');
-        return { ok: true, link: settings.nexusLinks[arg.name] };
-      } catch (e) { return { ok: false, error: e.message }; }
-    }
-    // ----- shared -----
-    case 'checkUpdates': await checkUpdates(10 * 60e3); return { ok: true };
-    case 'catalog':
-      if (!catalog) await refreshCatalog();
-      else if (Date.now() - catalog.fetched > 6 * 3600e3) refreshCatalog();
-      return { ok: !!catalog, fetched: catalog?.fetched || null, packages: catalog?.packages || [] };
-    case 'refreshCatalog': { const ok = await refreshCatalog(); return { ok, fetched: catalog?.fetched || null, packages: ok ? catalog.packages : null }; }
-    case 'install': return isAdmin() && !ownSource() ? installViaTmm(arg.full, arg.ver) : playerInstall(arg.full, arg.ver);
-    case 'importTmm': return importFromTmm();
-    case 'updateAll': return updateAll();
-    case 'readme': {
-      try {
-        const r = await net.fetch(`${TS}/api/experimental/package/${encodeURIComponent(arg.owner)}/${encodeURIComponent(arg.name)}/${encodeURIComponent(arg.ver)}/readme/`);
-        if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
-        return { ok: true, markdown: (await r.json()).markdown || '' };
+        return { ok: true, link: s.nexusLinks[arg.name] };
       } catch (e) { return { ok: false, error: e.message }; }
     }
     case 'buildModpack': return buildModpack();
     case 'publishModpack': return publishModpack();
-    case 'setToken': {
-      if (arg && !safeStorage.isEncryptionAvailable()) return { ok: false, error: 'Criptarea Windows nu e disponibilă.' };
-      settings.tokenEnc = arg ? enc(arg) : null;
-      saveSettings(); send('settings', publicSettings()); send('modpack', modpackInfo()); return { ok: true };
+    case 'showZip': { const z = modpackInfo().zip; if (z) shell.showItemInFolder(z); return { ok: !!z }; }
+    case 'setToken': s.tsTokenEnc = arg ? enc(arg) : null; saveSettings(); send('settings', publicSettings()); send('modpack', modpackInfo()); return { ok: true };
+    // ----- shared -----
+    case 'checkUpdates': await checkUpdates(10 * 60e3); return { ok: true };
+    case 'catalog':
+      if (!catalog) await refreshCatalog(); else if (Date.now() - catalog.fetched > 6 * 3600e3) refreshCatalog();
+      return { ok: !!catalog, fetched: catalog?.fetched || null, packages: catalog?.packages || [] };
+    case 'refreshCatalog': { const ok = await refreshCatalog(); return { ok, fetched: catalog?.fetched || null, packages: ok ? catalog.packages : null }; }
+    case 'install': return installPackage(arg.full, arg.ver);
+    case 'remove': return removePackage(arg);
+    case 'updateAll': return updateAll();
+    case 'readme': {
+      try {
+        const r = await fetchN(`${TS}/api/experimental/package/${encodeURIComponent(arg.owner)}/${encodeURIComponent(arg.name)}/${encodeURIComponent(arg.ver)}/readme/`);
+        if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+        return { ok: true, markdown: (await r.json()).markdown || '' };
+      } catch (e) { return { ok: false, error: e.message }; }
     }
     case 'setNexusKey': {
-      if (!arg) { settings.nexusKeyEnc = null; settings.nexusUser = null; saveSettings(); send('settings', publicSettings()); return { ok: true }; }
+      if (!arg) { G.nexusKeyEnc = null; G.nexusUser = null; saveSettings(); send('settings', publicSettings()); return { ok: true }; }
       nexus.key = String(arg).trim();
       try {
         const u = await nexus.validate();
-        settings.nexusKeyEnc = enc(arg); settings.nexusUser = { name: u.name, premium: !!u.is_premium };
-        saveSettings(); registerNxm(); send('settings', publicSettings()); send('player', isAdmin() ? null : playerInfo());
-        return { ok: true, user: settings.nexusUser };
+        G.nexusKeyEnc = enc(arg); G.nexusUser = { name: u.name, premium: !!u.is_premium };
+        saveSettings(); registerProtocols(); send('settings', publicSettings()); send('player', playerInfo());
+        return { ok: true, user: G.nexusUser };
       } catch (e) { return { ok: false, error: e.message }; }
     }
-    case 'setSetting': {
-      if (!SETTABLE.includes(arg.key)) return { ok: false };
-      settings[arg.key] = arg.value; saveSettings();
-      if (arg.key === 'startWithWindows') applyStartup();
-      if (arg.key === 'profile') { seenSig = null; send('mods', modsPayload()); }
-      if (arg.key === 'autoSync' && arg.value && watch.dirty) changedAt = Date.now() - settings.quietSeconds * 1000;
-      if (arg.key === 'autoSync') setWatch(arg.value ? 'idle' : 'off', arg.value ? 'pornit' : 'auto-sync oprit');
-      if (arg.key === 'manifestRepo' && !isAdmin()) refreshManifest();
-      if (arg.key === 'publishAddress') schedulePublish('setare adresă');
-      send('settings', publicSettings()); return { ok: true };
+    case 'githubLogin': {
+      if (!GITHUB_CLIENT_ID) return { ok: false, error: 'Login-ul GitHub din app nu e configurat - lipește un token (scope „gist”).' };
+      try {
+        const start = await listhost.deviceStart(fetchN, GITHUB_CLIENT_ID);
+        shell.openExternal(start.verification_uri);
+        listhost.devicePoll(fetchN, GITHUB_CLIENT_ID, start).then(async t => {
+          const u = await listhost.whoami(fetchN, t);
+          G.githubTokenEnc = enc(t); G.githubUser = u.login; saveSettings(); send('settings', publicSettings());
+          toast(`Conectat la GitHub ca ${u.login}.`, 'ok');
+        }).catch(e => toast(e.message, 'error'));
+        return { ok: true, code: start.user_code, uri: start.verification_uri };
+      } catch (e) { return { ok: false, error: e.message }; }
     }
-    case 'setRole': {
-      settings.role = arg === 'admin' ? 'admin' : 'player'; saveSettings();
-      app.relaunch(); quitting = true; app.quit(); return { ok: true };
+    case 'setGithubToken': {
+      if (!arg) { G.githubTokenEnc = null; G.githubUser = null; ghCliToken = undefined; saveSettings(); send('settings', publicSettings()); return { ok: true }; }
+      try { const u = await listhost.whoami(fetchN, String(arg).trim()); G.githubTokenEnc = enc(arg); G.githubUser = u.login; saveSettings(); send('settings', publicSettings()); return { ok: true, user: u.login }; }
+      catch (e) { return { ok: false, error: e.message }; }
+    }
+    case 'setSetting': {
+      if (GLOBAL_SETTABLE.includes(arg.key)) { G[arg.key] = arg.value; saveSettings(); if (arg.key === 'startWithWindows') applyStartup(); }
+      else if (SERVER_SETTABLE[arg.key] && s) {
+        s[SERVER_SETTABLE[arg.key]] = arg.value; saveSettings();
+        if (arg.key === 'autoSync') { if (arg.value && watch.dirty) changedAt = Date.now() - s.quietSeconds * 1000; setWatch(arg.value ? 'idle' : 'off', arg.value ? 'pornit' : 'auto-sync oprit'); }
+        if (arg.key === 'publishAddress' || arg.key === 'serverName' || arg.key === 'serverWorld') schedulePublish('setări');
+      } else return { ok: false };
+      send('settings', publicSettings()); return { ok: true };
     }
     case 'copy': clipboard.writeText(String(arg)); return { ok: true };
     case 'open': {
-      const targets = {
-        log: LOG_FILE, folder: adminRoot() || DATA, modpackFolder: adminRoot() && MODPACK_DIR(), profile: isAdmin() ? tmmProfileDir() : getProfile().dir,
-        game: game.game, thunderstoreApp: path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Thunderstore Mod Manager', 'Thunderstore Mod Manager.exe'),
-      };
+      const targets = { log: LOG_FILE, folder: DATA, profile: s ? getProfile().dir : DATA, game: game.game };
       if (targets[arg]) { const err = await shell.openPath(targets[arg]); return { ok: !err, error: err || null }; }
       if (/^https:\/\//.test(arg)) { shell.openExternal(arg); return { ok: true }; }
       return { ok: false };
     }
-    case 'showZip': { const z = modpackInfo().zip; if (z) shell.showItemInFolder(z); return { ok: !!z }; }
     case 'quit': quitting = true; app.quit(); return { ok: true };
     // ----- player -----
     case 'play': return playerSync({ launch: true });
     case 'updateMods': return playerSync({ launch: false });
     case 'refreshList': await refreshManifest(); return { ok: !manifestErr, error: manifestErr };
     case 'setRecommended': {
-      const bag = arg.nexus ? settings.nexusChosen : settings.recommended;
+      const bag = arg.nexus ? s.nexusChosen : s.recommended;
       if (arg.on) bag[arg.key] = true; else delete bag[arg.key];
       saveSettings(); send('player', playerInfo()); return { ok: true };
     }
-    case 'remove': return playerRemove(arg);
     case 'nexusPage': shell.openExternal(Nexus.filesPage(arg.modId, arg.fileId)); return { ok: true };
     case 'nexusSearch': try { return { ok: true, ...(await nexus.search(arg)) }; } catch (e) { return { ok: false, error: e.message }; }
     case 'nexusFiles': try { return { ok: true, files: await nexus.modFiles(arg) }; } catch (e) { return { ok: false, error: e.message }; }
     case 'nexusInstall': try { return await nexusInstall(arg); } catch (e) { return { ok: false, error: e.message }; }
     case 'nexusInstalled': {
-      // modId -> installed version, for the Nexus tab
       const out = {};
-      if (isAdmin() && !ownSource()) { for (const [k, l] of Object.entries(settings.nexusLinks)) if (fs.existsSync(path.join(pluginsDir(), k))) out[l.modId] = l.version || 'instalat'; }
-      else for (const p of Object.values(getProfile().packages)) if (p.source === 'nexus') out[p.modId] = p.ver;
+      if (s) for (const p of Object.values(getProfile().packages)) if (p.source === 'nexus') out[p.modId] = p.ver;
       return { ok: true, installed: out, pending: nexusPending };
     }
     case 'findGame': game = await Profile.findGame(); send('player', playerInfo()); return { ok: !!game.game, game };
     case 'restoreLoader': {
       if (!game.game) return { ok: false, error: 'Nu găsesc folderul jocului.' };
       const ok = Profile.restoreGame(game.game);
-      log(ok ? `Încărcătorul anterior de moduri e pus înapoi în ${game.game}` : 'Nu există backup de restaurat.');
       send('player', playerInfo());
       return ok ? { ok: true } : { ok: false, error: 'Nu există backup (Bifrost nu a înlocuit nimic).' };
     }
+    case 'checkAppUpdate': await checkAppUpdate(); return { ok: true, update: appUpdate };
   }
   return { ok: false, error: `unknown action ${name}` };
 }
 
-// ---------- start ----------
-app.on('second-instance', (_e, argv) => { const n = nxmArg(argv); if (n) handleNxm(n); else showWindow(); });
+// =====================================================================================================
+// START
+// =====================================================================================================
+app.on('second-instance', (_e, argv) => { const l = linkArg(argv); if (l) handleLink(l); else showWindow(); });
 app.on('before-quit', () => { quitting = true; });
 app.on('window-all-closed', () => { if (quitting) app.quit(); });
 
@@ -1211,34 +1307,29 @@ app.whenReady().then(async () => {
     if (!name || name.includes('..') || /[\\/]/.test(name)) return new Response('', { status: 404 });
     return net.fetch(pathToFileURL(path.join(pluginsDir(), name, 'icon.png')).toString());
   });
-  if (!app.isPackaged && !settings.shortcutsV2) devShortcuts();
-  applyStartup();
-  setupUpdater();
+  if (!app.isPackaged && !G.shortcutsV2 && !dataArg) devShortcuts();
+  if (!dataArg) { applyStartup(); registerProtocols(); }
   createTray();
   createWindow(!process.argv.includes('--hidden'));
-  log(`Bifrost ${app.getVersion()} pornit (${isAdmin() ? `admin, profil ${settings.profile}` : 'jucător'})`);
+  log(`Bifrost ${OWN_VERSION} pornit (${G.servers.length} servere${srv() ? `, activ: ${srv().name} - ${srv().role === 'admin' ? 'admin' : 'jucător'}` : ''})`);
+  loadManifestCache();
   indexCatalog();
   setTimeout(() => checkUpdates(6 * 3600e3), 6000);
   setInterval(() => checkUpdates(6 * 3600e3), 3600e3);
-  if (isAdmin()) {
-    seenSig = signature();
-    if (settings.autoSync) setTimeout(() => syncNow('pornire'), 4000); else setWatch('off', 'auto-sync oprit');
-    setInterval(tick, 5000);
-    setInterval(() => twoWay('verificare periodică'), 3 * 60e3);
-    pollStatus();
-    setInterval(() => { if (win && win.isVisible()) pollStatus(); }, 20000);
-    setInterval(() => { if (!win || !win.isVisible()) pollStatus(); }, 120000);
-  }
-  if (settings.nexusKeyEnc) registerNxm();
+  setTimeout(checkAppUpdate, 15000); setInterval(checkAppUpdate, 4 * 3600e3);
   game = await Profile.findGame();
-  if (settings.gameDir) game.game = settings.gameDir;
-  const nx0 = nxmArg(process.argv); if (nx0 && isAdmin()) setTimeout(() => handleNxm(nx0), 2000);
+  if (G.gameDir) game.game = G.gameDir;
+  // admin: watch the profile, sync, configs; everyone: status + the list
+  setTimeout(() => { if (isAdmin() && srv().conn && srv().autoSync) syncNow('pornire'); }, 4000);
+  setInterval(tick, 3000);
+  setInterval(() => twoWay('verificare periodică'), 3 * 60e3);
+  pollStatus();
+  setInterval(() => { if (win && win.isVisible()) pollStatus(); }, 20000);
+  setInterval(() => { if (!win || !win.isVisible()) pollStatus(); }, 120000);
   refreshManifest();
-  if (!isAdmin()) {
-    setInterval(() => { if (!job) refreshManifest(); }, 10 * 60e3);
-    const n = nxmArg(process.argv); if (n) setTimeout(() => handleNxm(n), 2000);
-  }
-  // test hook: --run=<action> runs an action once the window is up and logs the result
+  setInterval(() => { if (!job && srv()?.role === 'player') refreshManifest(); }, 10 * 60e3);
+  const l = linkArg(process.argv); if (l) setTimeout(() => handleLink(l), 2500);
+  // test hook: --run=<action>[:json arg]
   const run = (process.argv.find(a => a.startsWith('--run=')) || '').slice(6);
-  if (run) setTimeout(async () => log(`--run ${run}: ${JSON.stringify(await action(run))}`), 8000);
+  if (run) setTimeout(async () => { const [n, ...rest] = run.split(':'); const raw = rest.join(':'); const arg = !raw ? undefined : raw.startsWith('@') ? readJson(raw.slice(1), null) : JSON.parse(raw); log(`--run ${n}: ${JSON.stringify(await action(n, arg))}`); }, 8000);
 });

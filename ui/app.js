@@ -58,7 +58,8 @@ function renderStatus() {
   const pill = $('#srv-pill'), st = $('#srv-state');
   pill.className = 'status-pill';
   let tb = '';
-  if (s.reachable === null || s.reachable === undefined) { st.textContent = 'se verifică...'; pill.classList.add('busy'); }
+  if (S.settings.isAdmin && S.settings.server && !S.settings.server.conn) { st.textContent = 'fără conexiune la server'; }
+  else if (s.reachable === null || s.reachable === undefined) { st.textContent = 'se verifică...'; pill.classList.add('busy'); }
   else if (!s.reachable) { st.textContent = 'fără conexiune'; pill.classList.add('err'); }
   else if (s.container !== 'running') { st.textContent = s.container === 'missing' ? 'container lipsă' : `oprit (${s.container})`; pill.classList.add('err'); }
   else if (!s.joinCode && !s.gameUp) { st.textContent = 'pornește...'; pill.classList.add('busy'); }
@@ -142,8 +143,6 @@ function renderMods() {
   const nu = $('#nav-updates'); nu.hidden = !counts.updates; nu.textContent = counts.updates;
   const own = S.profile.source === 'bifrost';
   $('#mods-sub').textContent = `${own ? 'Profilul Bifrost' : `Profilul Thunderstore „${S.profile.profile || 'Default'}”`} · ${mods.length} moduri · ${counts.server} pe server`;
-  $('#mods-import').hidden = own || !S.settings.isAdmin;
-  $('#btn-tmm').hidden = own;
   $('#btn-update-all').hidden = !own || !counts.updates;
   $('#btn-update-all').textContent = `Actualizează tot (${counts.updates})`;
 
@@ -176,7 +175,9 @@ function renderMods() {
     const seg = sd === 'builtin'
       ? '<span class="badge lock" title="Vine din imaginea serverului (VALHEIM_PLUS=true)">inclus în server</span>'
       : m.modpack ? '' :
-        `${S.profile.source === 'bifrost' ? `<button class="icon-btn" data-uninstall="${esc(m.name)}" title="Dezinstalează">✕</button>` : ''}<div class="seg" data-name="${esc(m.name)}"><button class="server ${sd === 'server' ? 'on' : ''}" data-side="server" ${busy ? 'disabled' : ''}>Server</button><button class="client ${sd === 'client' ? 'on' : ''}" data-side="client" ${busy ? 'disabled' : ''}>Client</button></div>`;
+        `<div class="seg" data-name="${esc(m.name)}"><button class="server ${sd === 'server' ? 'on' : ''}" data-side="server" ${busy ? 'disabled' : ''}>Server</button><button class="client ${sd === 'client' ? 'on' : ''}" data-side="client" ${busy ? 'disabled' : ''}>Client</button></div>`;
+    // one grid cell for all the actions, so they stay on the right of the row
+    const uninstall = m.builtin || m.name === 'denikson-BepInExPack_Valheim' ? '' : `<button class="icon-btn" data-uninstall="${esc(m.name)}" title="Dezinstalează" ${busy ? 'disabled' : ''}>✕</button>`;
     return `<div class="mod ${m.enabled ? '' : 'disabled'}">
       ${icon}
       <div class="mod-body">
@@ -184,7 +185,7 @@ function renderMods() {
           <span class="mod-author">de ${esc(m.author)}</span><span class="mod-ver">${esc(m.version)}</span>${badges}</div>
         <div class="mod-desc" title="${esc(m.description)}">${esc(m.description)}</div>
       </div>
-      ${seg}
+      <div class="mod-actions">${seg}${uninstall}</div>
     </div>`;
   }).join('');
 }
@@ -282,9 +283,9 @@ function renderSettings() {
   });
   $('#token-state').innerHTML = s.hasToken ? '<span style="color:var(--green)">✓ Token salvat.</span>' : '<span class="muted">Niciun token salvat.</span>';
   $('#nexus-state').innerHTML = s.hasNexusKey && s.nexusUser ? `<span style="color:var(--green)">✓ Conectat ca <b>${esc(s.nexusUser.name)}</b> · ${s.nexusUser.premium ? 'Premium: descărcări automate' : 'cont gratuit: un click pe „Mod Manager Download” per fișier'}</span>` : '<span class="muted">Nicio cheie salvată.</span>';
-  $('#role-select').value = s.role === 'admin' ? 'admin' : 'player';
+  renderServers();
   document.body.classList.toggle('role-admin', !!s.isAdmin); document.body.classList.toggle('role-player', !s.isAdmin);
-  $('#brand-sub').textContent = s.isAdmin ? (s.serverName || 'Valheim') : (S.player?.manifest?.server?.name || 'Valheim');
+  $('#brand-sub').textContent = s.server?.name || 'Valheim';
 }
 $('#btn-nexus').onclick = async () => {
   const v = $('#nexus-input').value.trim(); if (!v) return;
@@ -294,12 +295,6 @@ $('#btn-nexus').onclick = async () => {
   toast(r.ok ? `Conectat la Nexus ca ${r.user.name}${r.user.premium ? ' (Premium)' : ''}.` : `Cheia nu merge: ${r.error}`, r.ok ? 'ok' : 'error');
 };
 $('#btn-nexus-clear').onclick = async () => { await window.vp.act('setNexusKey', null); toast('Cheia Nexus ștearsă.'); };
-$('#role-select').addEventListener('change', async e => {
-  const v = e.target.value;
-  if (v === 'admin' && !S.settings.adminRootOk) { toast('Pentru modul admin completează întâi „Folderul de admin” (cel cu sync-valheim-mods.ps1).', 'error'); e.target.value = 'player'; return; }
-  if (!await confirmBox('Schimbi modul?', v === 'admin' ? 'Bifrost repornește ca admin: administrează serverul și publică lista.' : 'Bifrost repornește ca jucător: instalează modurile serverului și pornește jocul.', 'Repornește')) { e.target.value = S.settings.role; return; }
-  window.vp.act('setRole', v);
-});
 document.addEventListener('click', e => { const o = e.target.closest('a[data-open]'); if (o && !o.closest('#drawer')) { e.preventDefault(); window.vp.act('open', o.dataset.open); } });
 $$('[data-set]').forEach(el => el.addEventListener('change', async () => {
   let v = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Math.max(+el.min || 0, Math.min(+el.max || 1e9, +el.value || 0)) : el.value.trim();
@@ -602,12 +597,16 @@ const fmtMB = b => b >= 1048576 ? `${(b / 1048576).toFixed(b >= 1e8 ? 0 : 1)} MB
 function renderPlayer() {
   const P = S.player; if (!P) return;
   const m = P.manifest, srv = m?.server || {};
-  $('#pl-name').textContent = srv.name || 'Server';
+  // admins and personal profiles play their own profile: no list needed
+  const own = S.settings.isAdmin || !S.settings.server?.list;
+  if (own) { srv.name = S.settings.server?.name; srv.joinCode = S.status?.joinCode || srv.joinCode; }
+  $('#pl-name').textContent = srv.name || S.settings.server?.name || 'Server';
   $('#pl-world').textContent = [srv.world, m?.updatedAt ? `lista actualizată ${ago(m.updatedAt)}` : ''].filter(Boolean).join(' · ');
-  $('#brand-sub').textContent = srv.name || 'Valheim';
+  $('#brand-sub').textContent = S.settings.server?.name || srv.name || 'Valheim';
   const pill = $('#pl-pill'); pill.className = 'status-pill';
   const need = P.plan.install.length + P.plan.remove.length;
-  if (!m) { $('#pl-state').textContent = P.error ? 'fără listă' : 'se încarcă...'; pill.classList.add(P.error ? 'err' : 'busy'); }
+  if (own && !S.job) { $('#pl-state').textContent = 'gata de joc'; pill.classList.add('ok'); }
+  else if (!m) { $('#pl-state').textContent = P.error ? 'fără listă' : 'se încarcă...'; pill.classList.add(P.error ? 'err' : 'busy'); }
   else if (S.job) { $('#pl-state').textContent = 'lucrez...'; pill.classList.add('busy'); }
   else if (need) { $('#pl-state').textContent = 'are nevoie de update'; pill.classList.add('warn'); }
   else { $('#pl-state').textContent = 'gata de joc'; pill.classList.add('ok'); }
@@ -620,7 +619,7 @@ function renderPlayer() {
   $('#pl-game').innerHTML = P.game?.game ? esc(P.game.game) : '<span style="color:var(--red)">negăsit</span> · <a href="#" data-page-link="settings">alege folderul</a>';
 
   const btn = $('#btn-play');
-  btn.disabled = !!S.job || !m;
+  btn.disabled = !!S.job || (!m && !own);
   btn.classList.toggle('working', !!S.job);
   btn.textContent = S.job ? (S.job.kind === 'play' ? 'Se pregătește...' : 'Lucrez...') : 'JOACĂ';
   $('#pl-play-note').textContent = !m ? '' : need ? `întâi: ${P.plan.install.length} de instalat${P.plan.remove.length ? `, ${P.plan.remove.length} de scos` : ''}${P.plan.bytes ? ` (~${fmtMB(P.plan.bytes)})` : ''}` : 'modurile sunt la zi';
@@ -705,18 +704,194 @@ function renderList() {
   const l = S.list || {}, pill = $('#list-pill');
   pill.className = `status-pill ${l.busy ? 'busy' : l.ok === false || l.error ? 'warn' : l.ok ? 'ok' : ''}`;
   $('#list-pill-text').textContent = l.busy ? 'public...' : l.error ? 'nepublicată' : l.ok ? `publicată ${ago(l.at)}` : 'încă nepublicată';
-  $('#list-sub').textContent = l.error || `Bifrost-ul prietenilor citește lista din ${S.settings.manifestRepo} și le instalează exact modurile serverului${S.settings.autoPublish ? ' - se publică singură după fiecare sincronizare și la join code nou.' : '.'}`;
+  const srv = S.settings.server || {};
+  $('#list-sub').textContent = l.error || (srv.list ? `Prietenii deschid invitația în Bifrost și primesc exact modurile serverului${S.settings.autoPublish ? ' - lista se publică singură după fiecare sincronizare și la join code nou.' : '.'}`
+    : 'Lista se creează la prima publicare (un Gist privat pe contul tău GitHub) - apoi primești linkul de invitație.');
+  $('#invite-box').hidden = !srv.list;
+  if (srv.list) { $('#inv-link').textContent = srv.inviteLink; $('#inv-code').textContent = srv.invite; }
   $('#btn-publish-list').disabled = !!l.busy;
 }
-$('#btn-list-open').onclick = () => window.vp.act('open', `https://github.com/${S.settings.manifestRepo}/blob/main/server.json`);
+const listUrl = l => !l ? null : l.kind === 'gist' ? `https://gist.github.com/${l.id}` : l.kind === 'github' ? `https://github.com/${l.repo}/blob/main/${l.path || 'server.json'}` : l.url;
+$('#btn-list-open').onclick = () => { const u = listUrl(S.settings.server?.list); if (u) window.vp.act('open', u); else toast('Lista nu e publicată încă.'); };
+const shareText = () => { const v = S.settings.server; return `Hai pe serverul nostru de Valheim „${v.name}”!\n1. Instalează Bifrost: https://github.com/FlorinCamarut1/bifrost/releases/latest\n2. Deschide invitația: ${v.inviteLink}\n   (sau în Bifrost: Adaugă server → codul ${v.invite})\n3. Apasă JOACĂ - modurile se instalează singure.`; };
+$('#btn-share-text').onclick = async () => { await window.vp.act('copy', shareText()); toast('Mesajul e copiat - lipește-l pe Discord.', 'ok'); };
+$('#btn-copy-invite').onclick = async () => { const v = S.settings.server; if (!v?.inviteLink) return toast('Serverul nu are încă o listă publicată.', 'error'); await window.vp.act('copy', shareText()); toast('Invitația e copiată.', 'ok'); };
+$('#btn-export-code').onclick = async () => {
+  const withCfg = await confirmBox('Cod de profil Thunderstore', 'Pun în cod și configurările modurilor? (De obicei da, ca prietenii să aibă aceleași setări.)', 'Da, cu configurări');
+  toast('Generez codul...');
+  const r = await window.vp.act('exportCode', { configs: withCfg });
+  if (!r.ok) return toast(r.error, 'error');
+  await window.vp.act('copy', r.code);
+  toast(`Cod copiat: ${r.code} - în r2modman / TMM: Import / update → From code.`, 'ok');
+};
+$('#btn-remove-server').onclick = async () => {
+  const v = S.settings.server; if (!v) return;
+  if (!await confirmBox(`Ștergi „${v.name}” din Bifrost?`, 'Profilul lui de moduri și setările lui dispar de pe PC-ul tău. Serverul în sine și lista publicată rămân neatinse.', 'Șterge')) return;
+  const r = await window.vp.act('removeServer', v.id);
+  if (!r.ok) toast(r.error, 'error');
+};
+
+// ---------- servers: switcher, welcome, wizard ----------
+const roleName = r => r === 'admin' ? 'admin' : 'jucător';
+function renderServers() {
+  const st = S.settings, list = st.servers || [], cur = st.server;
+  document.body.classList.toggle('no-server', !cur);
+  $('#srv-cur-badge').textContent = cur ? (cur.name || '?')[0].toUpperCase() : '+';
+  $('#srv-cur-name').textContent = cur ? cur.name : 'Niciun server';
+  $('#srv-cur-role').textContent = cur ? (cur.role === 'admin' ? 'admin' : cur.list ? 'jucător' : 'profil personal') : 'adaugă unul';
+  $('#srv-menu').innerHTML = list.map(x => `<button class="srv-item ${cur && x.id === cur.id ? 'on' : ''}" data-switch="${esc(x.id)}"><span class="srv-badge">${esc((x.name || '?')[0].toUpperCase())}</span>${esc(x.name)}<small>${roleName(x.role)}</small></button>`).join('')
+    + `${list.length ? '<hr>' : ''}<button class="srv-item" data-menu="join">＋ Am o invitație</button><button class="srv-item" data-menu="create">＋ Creează server</button><button class="srv-item" data-menu="local">＋ Profil personal</button>`;
+  if (cur) {
+    const c = cur.conn;
+    $('#set-conn').textContent = !c ? 'fără conexiune - doar lista' : c.type === 'ssh-docker' ? `${c.host}, Docker „${c.container}”` : c.type === 'ssh' ? `SSH ${c.host}: ${c.pluginsDir}` : c.type === 'local' ? `acest PC: ${c.pluginsDir}` : `FTP ${c.host}: ${c.pluginsDir}`;
+    $('#set-invite').textContent = cur.inviteLink ? `${cur.invite}` : 'lista nu e publicată încă';
+    $('#set-srv-title').textContent = `Serverul acesta: ${cur.name}`;
+  }
+  const gh = $('#gh-state');
+  if (gh) gh.innerHTML = st.githubUser ? `<span style="color:var(--green)">✓ Conectat ca <b>${esc(st.githubUser)}</b></span> - lista e un Gist privat pe contul tău.` : 'Pentru publicarea listei (un Gist privat pe contul tău). Merge și GitHub CLI (<code>gh</code>), dacă e logat.';
+  $('#btn-gh-clear').hidden = !st.githubUser; $('#btn-gh-login').hidden = !!st.githubUser || !st.githubLogin;
+}
+$('#srv-current').onclick = e => { e.stopPropagation(); $('#srv-menu').hidden = !$('#srv-menu').hidden; };
+document.addEventListener('click', e => { if (!e.target.closest('#srv-switch')) $('#srv-menu').hidden = true; });
+$('#srv-menu').addEventListener('click', async e => {
+  const sw = e.target.closest('[data-switch]'), m = e.target.closest('[data-menu]');
+  $('#srv-menu').hidden = true;
+  if (sw && sw.dataset.switch !== S.settings.server?.id) await window.vp.act('switchServer', sw.dataset.switch);
+  if (m?.dataset.menu === 'join') { const code = await confirmBox('Adaugă server', 'Lipește linkul sau codul de invitație primit de la adminul serverului.', 'Adaugă', ''); if (code) joinServer(code); }
+  if (m?.dataset.menu === 'create') openWizard('create');
+  if (m?.dataset.menu === 'local') openWizard('local');
+});
+async function joinServer(code) {
+  toast('Citesc lista serverului...');
+  const r = await window.vp.act('addServer', code);
+  toast(r.ok ? (r.existed ? 'Serverul era deja adăugat - l-am deschis.' : `Server adăugat: ${r.name} (${r.required} moduri). Apasă JOACĂ.`) : r.error, r.ok ? 'ok' : 'error');
+}
+$('#wl-join').onclick = () => { const v = $('#wl-invite').value.trim(); if (v) joinServer(v); };
+$('#wl-invite').addEventListener('keydown', e => { if (e.key === 'Enter') $('#wl-join').click(); });
+
+let wizMode = 'create';
+function openWizard(mode) {
+  wizMode = mode;
+  const w = $('#wiz'), cur = S.settings.server;
+  $('#wiz-title').textContent = { create: 'Creează server', local: 'Profil personal', import: 'Importă moduri în profil', conn: 'Conexiunea la server' }[mode];
+  $('#wiz-ok').textContent = { create: 'Creează', local: 'Creează', import: 'Importă', conn: 'Salvează' }[mode];
+  w.querySelector('[data-sec="name"]').hidden = !(mode === 'create' || mode === 'local');
+  w.querySelector('[data-sec="world"]').hidden = mode !== 'create';
+  w.querySelector('[data-sec="conn"]').hidden = !(mode === 'create' || mode === 'conn');
+  w.querySelector('[data-sec="source"]').hidden = mode === 'conn';
+  w.querySelector('[data-src="server"]').hidden = mode === 'local' || (mode === 'import' && !cur?.conn);
+  $('#wiz-note').textContent = mode === 'create' ? (S.settings.githubUser || S.settings.hasGithubToken ? '' : 'Lista pentru prieteni se publică după ce te conectezi la GitHub (Setări → Conturi) sau dacă ai GitHub CLI logat.') : '';
+  $('#wz-test-res').textContent = '';
+  if (mode === 'conn' && cur?.conn) {
+    const c = cur.conn;
+    $('#wz-type').value = c.type; $('#wz-host').value = c.host || ''; $('#wz-port').value = c.port || ''; $('#wz-container').value = c.container || '';
+    $('#wz-fhost').value = c.host || ''; $('#wz-fport').value = c.port || ''; $('#wz-fuser').value = c.user || ''; $('#wz-fsecure').checked = !!c.secure;
+    $('#wz-plugins').value = c.pluginsDir || ''; $('#wz-config').value = c.configDir || ''; $('#wz-restart').value = c.restartCmd || '';
+  }
+  wizType();
+  window.vp.act('localProfiles').then(r => {
+    $('#wz-local').innerHTML = (r.profiles || []).map(p => `<option value="${esc(p.dir)}">${esc(p.manager)} - ${esc(p.name)} (${p.mods} moduri${p.manual ? `, ${p.manual} manuale` : ''})</option>`).join('') || '<option value="">(niciun profil găsit)</option>';
+  });
+  w.hidden = false;
+  setTimeout(() => $(mode === 'create' || mode === 'local' ? '#wz-name' : '#wz-type').focus(), 50);
+}
+function wizType() {
+  const t = $('#wz-type').value;
+  $$('#wiz [data-for]').forEach(el => { el.hidden = !el.dataset.for.split(' ').includes(t); });
+  const ph = { 'ssh-docker': ['/config/valheimplus/plugins', '/config/valheimplus'], ssh: ['/home/steam/valheim/BepInEx/plugins', '/home/steam/valheim/BepInEx/config'], local: ['C:\\valheim-server\\BepInEx\\plugins', 'C:\\valheim-server\\BepInEx\\config'], ftp: ['/BepInEx/plugins', '/BepInEx/config'] }[t];
+  if (ph) { $('#wz-plugins').placeholder = ph[0]; $('#wz-config').placeholder = ph[1]; }
+}
+$('#wz-type').addEventListener('change', wizType);
+$$('#wiz input[name="wz-src"]').forEach(r => r.addEventListener('change', () => { const v = $('#wiz input[name="wz-src"]:checked').value; $('#wz-local').hidden = v !== 'local'; $('#wz-code').hidden = v !== 'code'; }));
+function wizConn() {
+  const t = $('#wz-type').value;
+  if (t === 'none') return null;
+  const c = { type: t };
+  if (t === 'ssh-docker' || t === 'ssh') { c.host = $('#wz-host').value.trim(); if ($('#wz-port').value.trim()) c.port = +$('#wz-port').value; }
+  if (t === 'ssh-docker') c.container = $('#wz-container').value.trim() || 'valheim';
+  if (t === 'ftp') { c.host = $('#wz-fhost').value.trim(); c.user = $('#wz-fuser').value.trim(); c.secure = $('#wz-fsecure').checked; if ($('#wz-fport').value.trim()) c.port = +$('#wz-fport').value; }
+  const pl = $('#wz-plugins').value.trim(), cf = $('#wz-config').value.trim(), rs = $('#wz-restart').value.trim();
+  if (pl) c.pluginsDir = pl; if (cf) c.configDir = cf; if (rs && (t === 'ssh' || t === 'local')) c.restartCmd = rs;
+  if (t !== 'ssh-docker' && (!c.pluginsDir || !c.configDir)) throw new Error('Completează folderele de pluginuri și de configurări.');
+  if ((t === 'ssh-docker' || t === 'ssh' || t === 'ftp') && !c.host) throw new Error('Completează hostul.');
+  return c;
+}
+$('#wz-test').onclick = async () => {
+  let c; try { c = wizConn(); } catch (e) { $('#wz-test-res').textContent = e.message; return; }
+  if (!c) return;
+  $('#wz-test-res').textContent = 'testez...';
+  const r = await window.vp.act('testConnection', { conn: c, secret: $('#wz-fpass').value || undefined });
+  $('#wz-test-res').innerHTML = !r.ok ? `<span style="color:var(--red)">${esc(r.error)}</span>`
+    : `<span style="color:var(--green)">✓ conectat</span> · pluginuri: ${r.plugins ? `da${r.mods != null ? ` (${r.mods})` : ''}` : '<b>nu găsesc folderul</b>'} · configurări: ${r.config ? 'da' : '<b>nu găsesc folderul</b>'}`;
+};
+$('#wiz-cancel').onclick = () => { $('#wiz').hidden = true; };
+$('#wiz-ok').onclick = async () => {
+  const srcKind = $('#wiz input[name="wz-src"]:checked').value;
+  const source = srcKind === 'local' ? { kind: 'local', dir: $('#wz-local').value } : srcKind === 'code' ? { kind: 'code', code: $('#wz-code').value.trim() } : { kind: srcKind };
+  if (source.kind === 'local' && !source.dir) return toast('Alege un profil.', 'error');
+  if (source.kind === 'code' && !source.code) return toast('Lipește codul de profil.', 'error');
+  let conn = null;
+  try { if (wizMode === 'create' || wizMode === 'conn') conn = wizConn(); } catch (e) { return toast(e.message, 'error'); }
+  const secret = $('#wz-fpass').value || undefined;
+  $('#wiz-ok').disabled = true;
+  try {
+    if (wizMode === 'conn') { await window.vp.act('setConnection', { conn, secret }); toast('Conexiunea e salvată.', 'ok'); }
+    else if (wizMode === 'import') { $('#wiz').hidden = true; toast('Import...'); const r = await window.vp.act('importInto', source); toast(r.ok ? `Import gata: ${r.count} pachete.` : r.error, r.ok ? 'ok' : 'error'); }
+    else {
+      const name = $('#wz-name').value.trim();
+      if (!name) return toast('Dă-i un nume.', 'error');
+      $('#wiz').hidden = true; toast(wizMode === 'create' ? 'Creez serverul și import modurile...' : 'Creez profilul...');
+      const r = await window.vp.act('createServer', { name, world: $('#wz-world').value.trim(), conn: wizMode === 'create' ? conn : null, secret, source, personal: wizMode === 'local' });
+      toast(r.ok ? `Gata: ${r.count} pachete în profil.${wizMode === 'create' && conn ? ' Pun modurile pe server...' : ''}` : r.error, r.ok ? 'ok' : 'error');
+    }
+    $('#wiz').hidden = true;
+  } finally { $('#wiz-ok').disabled = false; }
+};
+document.addEventListener('click', e => { const w = e.target.closest('[data-wizard]'); if (w) openWizard(w.dataset.wizard); });
+
+// ---------- GitHub account ----------
+$('#btn-gh-login').onclick = async () => {
+  const r = await window.vp.act('githubLogin');
+  if (!r.ok) return toast(r.error, 'error');
+  await window.vp.act('copy', r.code);
+  confirmBox('Conectare la GitHub', `S-a deschis ${r.uri}. Introdu codul ${r.code} (e deja copiat) și apasă Authorize. Bifrost află singur când ai terminat.`, 'OK');
+};
+$('#btn-gh-token').onclick = async () => {
+  const t = await confirmBox('Token GitHub', 'Un token „classic” cu permisiunea „gist” (github.com → Settings → Developer settings → Personal access tokens). E salvat criptat.', 'Salvează', '');
+  if (!t) return;
+  const r = await window.vp.act('setGithubToken', t);
+  toast(r.ok ? `Conectat la GitHub ca ${r.user}.` : r.error, r.ok ? 'ok' : 'error');
+};
+$('#btn-gh-clear').onclick = async () => { await window.vp.act('setGithubToken', null); toast('Deconectat de la GitHub.'); };
 
 // ---------- app update ----------
 function renderAppUpdate() {
   const u = S.appUpdate, el = $('#app-update');
   if (!u) { el.hidden = true; return; }
   el.hidden = false;
-  el.innerHTML = u.ready ? `<b>Bifrost ${esc(u.version)}</b> e gata.<button class="btn small primary" id="btn-app-update">Repornește și actualizează</button>` : `Se descarcă Bifrost ${esc(u.version)}...`;
+  el.innerHTML = u.installer ? `<b>Bifrost ${esc(u.version)}</b> e disponibil.<button class="btn small primary" id="btn-app-dl">Descarcă</button>`
+    : u.ready ? `<b>Bifrost ${esc(u.version)}</b> e gata.<button class="btn small primary" id="btn-app-update">Repornește și actualizează</button>` : `Se descarcă Bifrost ${esc(u.version)}...`;
+  const dl = $('#btn-app-dl'); if (dl) dl.onclick = () => window.vp.act('open', u.page);
   const b = $('#btn-app-update'); if (b) b.onclick = () => window.vp.installUpdate();
+}
+
+// ---------- language: the UI is written in Romanian; English (the default) is applied to whatever reaches the screen ----------
+let i18nObs = null;
+function applyLang() {
+  const en = (S.settings.lang || 'en') === 'en', t = window.bifrostI18n.t;
+  document.documentElement.lang = en ? 'en' : 'ro';
+  if (!en) { if (i18nObs) { i18nObs.disconnect(); i18nObs = null; location.reload(); } return; }
+  const fix = node => {
+    if (node.nodeType === 3) { const v = t(node.nodeValue); if (v !== node.nodeValue) node.nodeValue = v; return; }
+    if (node.nodeType !== 1 || node.tagName === 'SCRIPT' || node.tagName === 'STYLE' || node.id === 'log' || node.id === 'mini-log' || node.classList?.contains('readme')) return;
+    for (const at of ['placeholder', 'title']) { const v = node.getAttribute(at); if (v) { const n = t(v); if (n !== v) node.setAttribute(at, n); } }
+    for (const c of node.childNodes) fix(c);
+  };
+  fix(document.body);
+  if (!i18nObs) {
+    i18nObs = new MutationObserver(list => { for (const m of list) { if (m.type === 'characterData') fix(m.target); else m.addedNodes.forEach(fix); } });
+    i18nObs.observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
 }
 
 // ---------- events from main ----------
@@ -733,7 +908,7 @@ window.vp.on((ch, d) => {
   else if (ch === 'log') addLog(d);
   else if (ch === 'updates') { S.updates = d; renderMods(); }
   else if (ch === 'modpack') { S.modpack = d; renderModpack(); }
-  else if (ch === 'settings') { S.settings = d; renderSettings(); renderWatch(); renderModpack(); renderStatus(); renderList(); }
+  else if (ch === 'settings') { S.settings = d; applyLang(); renderSettings(); renderWatch(); renderModpack(); renderStatus(); renderList(); }
   else if (ch === 'toast') toast(d.text, d.kind);
   else if (ch === 'installing') { S.installing = d; renderMods(); renderBrowse(false); refreshDrawer(); }
   else if (ch === 'catalogState') { S.catalogBusy = d.busy; if (d.fetched) S.catalogFetched = d.fetched; renderBrowseSub(); }
@@ -743,11 +918,12 @@ window.vp.on((ch, d) => {
   const d = await window.vp.init();
   Object.assign(S, { settings: d.settings, profile: d.profile, status: d.status, job: d.job, watch: d.watch, updates: d.updates, modpack: d.modpack, installing: d.installing || {}, catalogFetched: d.catalogFetched, player: d.player, list: d.list || {}, appUpdate: d.appUpdate });
   logEntries = d.log; $('#log').innerHTML = d.log.map(logLine).join('\n') + '\n';
-  $('#about').textContent = `Bifrost ${d.version}${d.settings.packaged ? '' : ' (din sursă)'} · ${d.settings.isAdmin ? 'admin' : 'jucător'}`;
+  $('#about').textContent = `Bifrost ${d.version}${d.settings.packaged ? '' : ' (din sursă)'} · ${(d.settings.servers || []).length} servere`;
+  applyLang();
   renderSettings();
   renderHowto();
-  go(d.settings.isAdmin ? 'server' : 'home');
-  if (!d.settings.isAdmin) { loadCatalogQuiet(); }
+  go(!d.settings.server ? 'welcome' : d.settings.isAdmin ? 'server' : 'home');
+  loadCatalogQuiet();
   renderStatus(); renderWatch(); renderMods(); renderModpack(); renderMiniLog(); renderPlayer(); renderPlayerMods(); renderList(); renderAppUpdate(); renderSettingsGame();
   setInterval(() => { renderWatch(); renderStatus(); }, 30000);
 })();

@@ -14,12 +14,17 @@
 
 <div class="shell">
   <nav class="sidebar">
-    <button class="nav" data-page="home"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5-12-7.5Z"/></svg><span>Joacă</span></button>
-    <button class="nav" data-page="server" data-role="admin"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><circle cx="7.5" cy="7.5" r="1"/><circle cx="7.5" cy="16.5" r="1"/></svg><span>Server</span></button>
-    <button class="nav" data-page="mods" data-role="admin"><svg viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg><span>Moduri</span><b class="count" id="nav-updates" hidden></b></button>
-    <button class="nav" data-page="pmods" data-role="player"><svg viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg><span>Moduri</span></button>
-    <button class="nav" data-page="browse"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z"/></svg><span>Descoperă</span></button>
-    <button class="nav" data-page="modpack" data-role="admin"><svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/></svg><span>Modpack</span><b class="count warn" id="nav-modpack" hidden></b></button>
+    <div class="srv-switch" id="srv-switch">
+      <button class="srv-current" id="srv-current"><span class="srv-badge" id="srv-cur-badge">?</span><div class="srv-cur-text"><b id="srv-cur-name">Niciun server</b><small id="srv-cur-role">adaugă unul</small></div><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+      <div class="srv-menu" id="srv-menu" hidden></div>
+    </div>
+    <button class="nav" data-page="welcome" data-need="none" hidden><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3z"/></svg><span>Start</span></button>
+    <button class="nav" data-page="home" data-need="server"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5-12-7.5Z"/></svg><span>Joacă</span></button>
+    <button class="nav" data-page="server" data-role="admin" data-need="server"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><circle cx="7.5" cy="7.5" r="1"/><circle cx="7.5" cy="16.5" r="1"/></svg><span>Server</span></button>
+    <button class="nav" data-page="mods" data-role="admin" data-need="server"><svg viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg><span>Moduri</span><b class="count" id="nav-updates" hidden></b></button>
+    <button class="nav" data-page="pmods" data-need="server" data-role="player"><svg viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg><span>Moduri</span></button>
+    <button class="nav" data-page="browse" data-need="server"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z"/></svg><span>Descoperă</span></button>
+    <button class="nav" data-page="modpack" data-role="admin" data-need="server"><svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/></svg><span>Modpack</span><b class="count warn" id="nav-modpack" hidden></b></button>
     <button class="nav" data-page="log"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>Jurnal</span></button>
     <button class="nav" data-page="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg><span>Setări</span></button>
     <div class="sidebar-foot">
@@ -30,6 +35,32 @@
 
   <main>
     <!-- SERVER -->
+    <!-- WELCOME (no server yet) -->
+    <section class="page" id="page-welcome">
+      <div class="welcome-hero">
+        <img src="app.png" alt="">
+        <h1>Bun venit în Bifrost</h1>
+        <p class="muted">Moduri Valheim pentru jocul cu prietenii pe același server - fiecare are exact modurile serverului, la zi.</p>
+      </div>
+      <div class="grid2">
+        <div class="card welcome-card">
+          <h2>Am primit o invitație</h2>
+          <p class="muted small">Lipește linkul sau codul de la adminul serverului (ex. <code>g.1a2b3c…</code>). Bifrost îți face un profil pentru serverul acela și instalează modurile lui.</p>
+          <div class="row gap"><input class="txt grow" id="wl-invite" placeholder="bifrost://join/… sau g.…"><button class="btn primary" id="wl-join">Adaugă</button></div>
+        </div>
+        <div class="card welcome-card">
+          <h2>Am un server</h2>
+          <p class="muted small">Pentru cine ține serverul: Bifrost îi pune modurile (SSH, Docker, folder local sau FTP), îl repornește când nu e nimeni și le dă prietenilor un link de invitație.</p>
+          <button class="btn primary" data-wizard="create">Creează server</button>
+        </div>
+      </div>
+      <div class="card welcome-card">
+        <h2>Doar moduri, fără server</h2>
+        <p class="muted small">Un profil personal: din Thunderstore Mod Manager / r2modman, dintr-un cod de profil Thunderstore sau gol.</p>
+        <button class="btn" data-wizard="local">Profil personal</button>
+      </div>
+    </section>
+
     <!-- HOME (player) -->
     <section class="page" id="page-home">
       <div class="hero card">
@@ -139,7 +170,12 @@
       <div class="card">
         <div class="row between"><h2>Lista pentru prieteni</h2><span class="status-pill" id="list-pill"><span class="dot"></span><span id="list-pill-text">...</span></span></div>
         <p class="muted small" id="list-sub">Bifrost-ul prietenilor citește lista asta și le instalează exact modurile serverului.</p>
-        <div class="row gap wrap"><button class="btn" data-act="publishList" id="btn-publish-list">Publică acum</button><button class="btn ghost" id="btn-list-open">Vezi pe GitHub ↗</button><label class="switch right"><input type="checkbox" data-set="autoPublish"><span></span>Automat</label></div>
+        <div class="invite" id="invite-box" hidden>
+          <div class="kv"><span>Link de invitație</span><code id="inv-link"></code><button class="icon-btn" data-copy-id="inv-link" title="Copiază">⧉</button></div>
+          <div class="kv"><span>Cod</span><code id="inv-code"></code><button class="icon-btn" data-copy-id="inv-code" title="Copiază">⧉</button></div>
+          <button class="btn small" id="btn-share-text">Copiază mesajul pentru prieteni</button>
+        </div>
+        <div class="row gap wrap"><button class="btn" data-act="publishList" id="btn-publish-list">Publică acum</button><button class="btn ghost" id="btn-list-open">Vezi lista ↗</button><label class="switch right"><input type="checkbox" data-set="autoPublish"><span></span>Automat</label></div>
       </div>
 
       <div class="card">
@@ -156,15 +192,11 @@
           <div class="muted" id="mods-sub">Profilul Thunderstore „Default”</div>
         </div>
         <div class="row gap">
-          <button class="btn" data-act="open" data-arg="thunderstoreApp" id="btn-tmm">Deschide Thunderstore</button>
+          <button class="btn" data-wizard="import">Importă moduri</button>
           <button class="btn" data-act="updateAll" id="btn-update-all" hidden>Actualizează tot</button>
           <button class="btn" data-act="checkUpdates" id="btn-updates">Caută update-uri</button>
           <button class="btn primary" data-act="sync">Sincronizează</button>
         </div>
-      </div>
-      <div class="banner info" id="mods-import" hidden>
-        <span><b>Treci pe profilul Bifrost.</b> Import o singură dată din Thunderstore Mod Manager exact aceleași moduri și versiuni, configurările tale și modurile manuale. După asta instalezi, actualizezi și scoți totul de aici (Descoperă / Moduri), serverul și prietenii se sincronizează din Bifrost, iar Valheim îl pornești cu JOACĂ. TMM nu mai e necesar.</span>
-        <button class="btn primary" data-act="importTmm">Importă din TMM</button>
       </div>
       <div class="banner info" id="mods-pending" hidden></div>
       <div class="toolbar">
@@ -243,52 +275,54 @@
     <!-- SETTINGS -->
     <section class="page" id="page-settings">
       <div class="page-head"><div><h1>Setări</h1></div></div>
-      <div class="card settings">
-        <h2>General</h2>
-        <label class="setting" data-role="admin"><div><b>Auto-sync</b><small>Pune modurile pe server când Thunderstore le schimbă.</small></div><span class="switch"><input type="checkbox" data-set="autoSync"><span></span></span></label>
-        <label class="setting"><div><b>Pornește cu Windows</b><small>Stă în tray, fără fereastră.</small></div><span class="switch"><input type="checkbox" data-set="startWithWindows"><span></span></span></label>
-        <label class="setting"><div><b>Notificări</b><small>Update-uri, join code nou, erori.</small></div><span class="switch"><input type="checkbox" data-set="notifications"><span></span></span></label>
-        <label class="setting" data-role="admin"><div><b>Așteaptă după o schimbare</b><small>Secunde de liniște în Thunderstore înainte de sync.</small></div><input type="number" min="10" max="600" data-set="quietSeconds" class="num"></label>
+
+      <div class="card settings" data-need="server">
+        <h2 id="set-srv-title">Serverul acesta</h2>
+        <label class="setting" data-role="admin"><div><b>Numele serverului</b><small>Așa îl văd prietenii.</small></div><input data-set="serverName" class="txt"></label>
+        <label class="setting" data-role="admin"><div><b>Lumea</b></div><input data-set="serverWorld" class="txt"></label>
+        <div class="setting" data-role="admin"><div><b>Conexiunea</b><small id="set-conn">–</small></div><button class="btn" data-wizard="conn">Schimbă</button></div>
+        <label class="setting" data-role="admin"><div><b>Adrese</b><small>Pentru tine și pentru statusul Steam, ex. <code>LAN=192.168.1.10:2456; Public=1.2.3.4:2456</code></small></div><input data-set="addresses" class="txt"></label>
+        <label class="setting" data-role="admin"><div><b>Auto-sync</b><small>Pune modurile pe server după fiecare schimbare.</small></div><span class="switch"><input type="checkbox" data-set="autoSync"><span></span></span></label>
+        <label class="setting" data-role="admin"><div><b>Toate modurile pe server</b><small>Și cele de client. Pentru prieteni, Server/Client hotărăște ce e obligatoriu și ce e recomandat.</small></div><span class="switch"><input type="checkbox" data-set="syncAllMods"><span></span></span></label>
+        <label class="setting" data-role="admin"><div><b>Sincronizează configurările</b><small>BepInEx/config ↔ server, în ambele sensuri.</small></div><span class="switch"><input type="checkbox" data-set="syncConfigs"><span></span></span></label>
+        <label class="setting" data-role="admin"><div><b>Adu modurile puse direct pe server</b><small>Ce găsesc pe server și nu e în profil îl aduc la tine și îl gestionez eu.</small></div><span class="switch"><input type="checkbox" data-set="pullServerMods"><span></span></span></label>
         <label class="setting" data-role="admin"><div><b>Reîncearcă restartul la</b><small>Minute, cât timp sunt jucători pe server.</small></div><input type="number" min="1" max="60" data-set="retryMinutes" class="num"></label>
+        <label class="setting" data-role="admin"><div><b>Publică lista automat</b><small>După fiecare sincronizare și la join code nou.</small></div><span class="switch"><input type="checkbox" data-set="autoPublish"><span></span></span></label>
+        <label class="setting" data-role="admin"><div><b>Pune și IP-ul în listă</b><small>Lista e un link pe care îl dai prietenilor; fără IP intră cu join code-ul.</small></div><span class="switch"><input type="checkbox" data-set="publishAddress"><span></span></span></label>
+        <div class="setting"><div><b>Invitație</b><small id="set-invite">–</small></div><button class="btn" id="btn-copy-invite">Copiază linkul</button></div>
+        <div class="setting"><div><b>Cod de profil Thunderstore</b><small>Pentru cine folosește r2modman / Thunderstore Mod Manager: aceleași moduri, fără update automat.</small></div><button class="btn" id="btn-export-code">Generează cod</button></div>
+        <div class="setting"><div><b>Șterge serverul din Bifrost</b><small>Scoate profilul lui de pe PC-ul tău. Serverul în sine nu e atins.</small></div><button class="btn danger" id="btn-remove-server">Șterge</button></div>
       </div>
-      <div class="card settings" data-role="player">
-        <h2>Joc</h2>
-        <label class="setting"><div><b>Folderul Valheim</b><small id="game-detected">Găsit automat prin Steam. Completează doar dacă nu e găsit.</small></div><input data-set="gameDir" class="txt" placeholder="automat"></label>
-        <label class="setting"><div><b>Lista serverului</b><small>Repo-ul GitHub de unde iau modurile serverului.</small></div><input data-set="manifestRepo" class="txt"></label>
-        <div class="setting"><div><b>Încărcătorul de moduri</b><small id="loader-state">Bifrost pune lângă valheim.exe încărcătorul BepInEx care citește profilul lui. Ce era acolo înainte (ex. de la Thunderstore Mod Manager) e păstrat și se poate pune înapoi.</small></div><button class="btn" data-act="restoreLoader" id="btn-restore-loader">Restaurează anteriorul</button></div>
-      </div>
+
       <div class="card settings">
-        <h2>Nexus Mods</h2>
-        <p class="muted small">Pentru modurile care nu sunt pe Thunderstore. Cheia ta personală: <a href="#" data-open="https://next.nexusmods.com/settings/api-keys">nexusmods.com → Settings → API Keys</a> (jos, „Personal API Key”). Cu cont gratuit apeși „Mod Manager Download” pe site pentru fiecare fișier și Bifrost îl instalează; cu Premium e complet automat. Cheia e salvată criptat cu contul tău Windows.</p>
+        <h2>Conturi</h2>
+        <div class="setting" data-role="admin"><div><b>GitHub</b><small id="gh-state">Pentru publicarea listei (un Gist privat pe contul tău).</small></div><div class="row gap"><button class="btn" id="btn-gh-login">Conectează</button><button class="btn ghost" id="btn-gh-token">Token</button><button class="btn ghost" id="btn-gh-clear" hidden>Deconectează</button></div></div>
+        <div class="setting"><div><b>Nexus Mods</b><small>Cheia personală: <a href="#" data-open="https://next.nexusmods.com/settings/api-keys">nexusmods.com → Settings → API Keys</a>. Cont gratuit: un click pe „Slow download” per fișier; Premium: automat. Salvată criptat.</small></div></div>
         <div class="row gap"><input type="password" id="nexus-input" class="txt grow" placeholder="cheia API Nexus"><button class="btn primary" id="btn-nexus">Salvează</button><button class="btn ghost" id="btn-nexus-clear">Șterge</button></div>
         <p class="small" id="nexus-state"></p>
       </div>
-      <div class="card settings" data-role="admin">
-        <h2>Server</h2>
-        <label class="setting"><div><b>Numele serverului</b><small>Așa îl văd prietenii în Bifrost.</small></div><input data-set="serverName" class="txt"></label>
-        <label class="setting"><div><b>Lumea</b></div><input data-set="serverWorld" class="txt"></label>
-        <label class="setting"><div><b>Adrese în plus</b><small>Doar pentru tine, ex. <code>LAN=192.168.1.10:2456; VPN=100.x.x.x:2456</code></small></div><input data-set="addresses" class="txt"></label>
-        <label class="setting"><div><b>Server SSH</b><small>user@host, cu cheie SSH (fără parolă).</small></div><input data-set="server" class="txt"></label>
-        <label class="setting"><div><b>Container</b></div><input data-set="container" class="txt"></label>
-        <label class="setting"><div><b>Profil Thunderstore</b></div><input data-set="profile" class="txt"></label>
-        <label class="setting"><div><b>Lista pentru prieteni</b><small>Repo GitHub public (publicat cu GitHub CLI, <code>gh</code>).</small></div><input data-set="manifestRepo" class="txt"></label>
-        <label class="setting"><div><b>Toate modurile pe server</b><small>Și cele de client. Pentru prieteni, Server/Client hotărăște doar ce e obligatoriu și ce e recomandat.</small></div><span class="switch"><input type="checkbox" data-set="syncAllMods"><span></span></span></label>
-        <label class="setting"><div><b>Sincronizează configurările</b><small>BepInEx/config ↔ server, în ambele sensuri: ce schimbi la tine pleacă pe server, ce se schimbă pe server (ex. din joc) vine la tine.</small></div><span class="switch"><input type="checkbox" data-set="syncConfigs"><span></span></span></label>
-        <label class="setting"><div><b>Adu modurile puse direct pe server</b><small>Ce găsesc pe server și nu e în profil îl aduc la tine și apoi îl gestionez eu.</small></div><span class="switch"><input type="checkbox" data-set="pullServerMods"><span></span></span></label>
-        <label class="setting"><div><b>Publică și IP-ul serverului</b><small>Lista e publică pe GitHub. Fără IP prietenii intră cu join code-ul; IP-ul îl poți da pe Discord.</small></div><span class="switch"><input type="checkbox" data-set="publishAddress"><span></span></span></label>
-        <label class="setting"><div><b>Folderul de admin</b><small>Cel cu sync-valheim-mods.ps1, mods.json, modpack.</small></div><input data-set="adminFolder" class="txt"></label>
+
+      <div class="card settings">
+        <h2>Joc</h2>
+        <label class="setting"><div><b>Folderul Valheim</b><small id="game-detected">Găsit automat prin Steam. Completează doar dacă nu e găsit.</small></div><input data-set="gameDir" class="txt" placeholder="automat"></label>
+        <div class="setting"><div><b>Încărcătorul de moduri</b><small id="loader-state">Bifrost pune lângă valheim.exe încărcătorul BepInEx care citește profilul serverului ales. Ce era acolo înainte e păstrat și se poate pune înapoi.</small></div><button class="btn" data-act="restoreLoader" id="btn-restore-loader">Restaurează anteriorul</button></div>
       </div>
+
       <div class="card settings" data-role="admin">
-        <h2>Thunderstore (publicare modpack)</h2>
-        <p class="muted small">Pe thunderstore.io: Settings → Teams → echipa ta → Service Accounts → Add service account. Lipește tokenul (<code>tss_…</code>) aici. E salvat criptat cu contul tău Windows.</p>
+        <h2>Modpack Thunderstore (opțional)</h2>
+        <p class="muted small">Un pachet pe Thunderstore cu modurile serverului, pentru cine nu folosește Bifrost. Tokenul: thunderstore.io → Settings → Teams → echipa ta → Service Accounts.</p>
+        <label class="setting"><div><b>Echipa</b></div><input data-set="modpackTeam" class="txt"></label>
+        <label class="setting"><div><b>Numele pachetului</b></div><input data-set="modpackName" class="txt"></label>
         <div class="row gap"><input type="password" id="token-input" class="txt grow" placeholder="tss_..."><button class="btn primary" id="btn-token">Salvează</button><button class="btn ghost" id="btn-token-clear">Șterge</button></div>
         <p class="small" id="token-state"></p>
       </div>
+
       <div class="card settings">
-        <h2>Despre</h2>
-        <label class="setting"><div><b>Mod</b><small>Jucător: instalează modurile serverului și pornește jocul. Admin: administrează serverul (are nevoie de folderul de admin).</small></div>
-          <select class="select" id="role-select"><option value="player">Jucător</option><option value="admin">Admin</option></select></label>
-        <div class="row gap wrap" style="margin-top:12px"><button class="btn" data-act="open" data-arg="folder">Folderul aplicației</button><button class="btn" data-act="open" data-arg="profile">Profilul de moduri</button><button class="btn" data-act="open" data-arg="log">Jurnalul</button><button class="btn danger" data-act="quit">Închide complet</button></div>
+        <h2>General</h2>
+        <label class="setting"><div><b>Limba</b></div><select class="select" data-set="lang"><option value="en">English</option><option value="ro">Română</option></select></label>
+        <label class="setting"><div><b>Pornește cu Windows</b><small>Stă în tray, fără fereastră.</small></div><span class="switch"><input type="checkbox" data-set="startWithWindows"><span></span></span></label>
+        <label class="setting"><div><b>Notificări</b><small>Update-uri, join code nou, erori.</small></div><span class="switch"><input type="checkbox" data-set="notifications"><span></span></span></label>
+        <div class="row gap wrap" style="margin-top:12px"><button class="btn" data-act="open" data-arg="folder">Folderul aplicației</button><button class="btn" data-act="open" data-arg="profile">Profilul de moduri</button><button class="btn" data-act="open" data-arg="log">Jurnalul</button><button class="btn" data-act="checkAppUpdate">Caută update</button><button class="btn danger" data-act="quit">Închide complet</button></div>
         <p class="muted small" id="about"></p>
       </div>
     </section>
@@ -297,10 +331,49 @@
 
 <div class="drawer-bg" id="drawer-bg" hidden></div>
 <aside class="drawer" id="drawer" hidden><button class="icon-btn drawer-x" id="drawer-x" title="Închide">✕</button><div id="drawer-body"></div></aside>
+<div class="modal" id="wiz" hidden><div class="modal-box wide">
+  <h3 id="wiz-title">Creează server</h3>
+  <div class="wiz-body">
+    <div class="wiz-sec" data-sec="name">
+      <label class="field"><span>Numele serverului</span><input class="txt" id="wz-name" placeholder="ex. Valhalla cu prietenii"></label>
+      <label class="field" data-sec="world"><span>Lumea (opțional)</span><input class="txt" id="wz-world"></label>
+    </div>
+    <div class="wiz-sec" data-sec="conn">
+      <h4>Unde rulează serverul</h4>
+      <select class="select" id="wz-type">
+        <option value="ssh-docker">Linux prin SSH, în Docker (imaginea valheim-server)</option>
+        <option value="ssh">Linux prin SSH, foldere obișnuite</option>
+        <option value="local">Pe acest PC</option>
+        <option value="ftp">FTP / FTPS (server închiriat)</option>
+        <option value="none">Fără conexiune - doar lista pentru prieteni</option>
+      </select>
+      <div class="wz-fields" data-for="ssh-docker ssh"><label class="field"><span>SSH (user@host)</span><input class="txt" id="wz-host" placeholder="user@192.168.1.10"></label><label class="field small-f"><span>Port</span><input class="txt" id="wz-port" placeholder="22"></label></div>
+      <p class="muted small" data-for="ssh-docker ssh">Cu cheie SSH, fără parolă (<code>ssh-keygen</code> + <code>ssh-copy-id</code>). Testează mai jos.</p>
+      <div class="wz-fields" data-for="ssh-docker"><label class="field"><span>Containerul</span><input class="txt" id="wz-container" placeholder="valheim"></label></div>
+      <div class="wz-fields" data-for="ftp"><label class="field"><span>Host FTP</span><input class="txt" id="wz-fhost"></label><label class="field small-f"><span>Port</span><input class="txt" id="wz-fport" placeholder="21"></label></div>
+      <div class="wz-fields" data-for="ftp"><label class="field"><span>Utilizator</span><input class="txt" id="wz-fuser"></label><label class="field"><span>Parolă</span><input class="txt" type="password" id="wz-fpass"></label><label class="field small-f"><span>FTPS</span><span class="switch"><input type="checkbox" id="wz-fsecure"><span></span></span></label></div>
+      <div class="wz-fields" data-for="ssh local ftp ssh-docker"><label class="field"><span>Folderul de pluginuri</span><input class="txt" id="wz-plugins" placeholder="…/BepInEx/plugins"></label><label class="field"><span>Folderul de configurări</span><input class="txt" id="wz-config" placeholder="…/BepInEx/config"></label></div>
+      <div class="wz-fields" data-for="ssh local"><label class="field"><span>Comandă de restart (opțional)</span><input class="txt" id="wz-restart" placeholder="ex. sudo systemctl restart valheim"></label></div>
+      <div class="row gap" data-for="ssh-docker ssh local ftp"><button class="btn" id="wz-test">Testează conexiunea</button><span class="small" id="wz-test-res"></span></div>
+    </div>
+    <div class="wiz-sec" data-sec="source">
+      <h4>Modurile</h4>
+      <label class="radio" data-src="server"><input type="radio" name="wz-src" value="server"><span><b>Ce rulează deja serverul</b><small>Citesc pluginurile de pe server și le iau din Thunderstore; restul vin ca moduri manuale.</small></span></label>
+      <label class="radio"><input type="radio" name="wz-src" value="local"><span><b>Dintr-un alt mod manager de pe PC</b><small>Thunderstore Mod Manager / r2modman, cu configurările lui.</small></span></label>
+      <select class="select" id="wz-local" hidden></select>
+      <label class="radio"><input type="radio" name="wz-src" value="code"><span><b>Cod de profil Thunderstore</b><small>Codul „Export profile as code” din r2modman / TMM.</small></span></label>
+      <input class="txt" id="wz-code" placeholder="018c1f7e-..." hidden>
+      <label class="radio"><input type="radio" name="wz-src" value="empty" checked><span><b>Gol</b><small>Doar BepInEx; adaugi tu din Descoperă.</small></span></label>
+    </div>
+    <p class="small" id="wiz-note"></p>
+  </div>
+  <div class="row gap end"><button class="btn ghost" id="wiz-cancel">Anulează</button><button class="btn primary" id="wiz-ok">Creează</button></div>
+</div></div>
 <div class="modal" id="modal" hidden><div class="modal-box"><h3 id="modal-title"></h3><p id="modal-text"></p><input class="txt modal-input" id="modal-input" hidden><div class="row gap end"><button class="btn ghost" id="modal-no">Anulează</button><button class="btn primary" id="modal-yes">Da</button></div></div></div>
 <div class="toasts" id="toasts"></div>
 <script src="vendor/marked.umd.js"></script>
 <script src="vendor/purify.min.js"></script>
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
