@@ -126,6 +126,12 @@
     'Nexus nu spune dacă un mod e de server sau de client - citește descrierea de pe Nexus.': 'Nexus does not say whether a mod is server or client - read its description on Nexus.',
     'După instalare îl marchezi la': 'After installing, mark it under', '(Server / Client).': '(Server / Client).', 'Doar arhivele .zip și .7z se pot instala automat.': 'zip, 7z, rar and bare DLLs install automatically.',
     'endorsements': 'endorsements', 'Fișiere': 'Files', 'Niciun fișier activ.': 'No active files.',
+    // ---- BepInEx console ----
+    "Consola BepInEx": "BepInEx console",
+    "Fereastra neagră de lângă joc. Jurnalul complet rămâne oricum în BepInEx/LogOutput.log.": "The black window next to the game. The full log stays in BepInEx/LogOutput.log anyway.",
+    "Doar erori": "Errors only",
+    "Ascunsă": "Hidden",
+    "Tot (pentru depanare)": "Everything (for debugging)",
     // ---- direct join ----
     "Intră direct pe server la JOACĂ": "Join the server directly on PLAY",
     "Fără join code și fără parolă în joc: alegi caracterul, apeși Start și ești pe server.": "No join code and no password in the game: pick the character, press Start and you are on the server.",
