@@ -108,6 +108,10 @@ function renderWatch() {
   const what = w.lastResult && w.lastResult.what;
   $('#sync-what').hidden = !what || !!j; $('#sync-what').textContent = what || '';
   $('#tg-autosync').checked = !!auto;
+  const tw = w.twoWay;
+  $('#twoway-line').innerHTML = !S.settings.ownSource ? '' : !tw ? 'Configurări: se verifică...'
+    : tw.error ? `<span style="color:var(--red)">Configurări: ${esc(tw.error)}</span>`
+      : `Configurări ${tw.push || tw.pull ? `sincronizate (↑ ${tw.push} trimise, ↓ ${tw.pull} aduse)` : 'la zi'} · ${ago(tw.at)}${tw.mods && tw.mods.length ? ` · aduse de pe server: ${esc(tw.mods.join(', '))}` : ''} · <a href="#" data-act="twoWay">verifică acum</a>`;
 
   const side = $('#side-sync'), dot = side.querySelector('.dot');
   dot.className = `dot ${j ? 'busy' : !auto ? '' : ring === 'ok' ? 'ok' : ring === 'wait' ? 'warn' : ring === 'err' ? 'err' : 'busy'}`;

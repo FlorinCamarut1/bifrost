@@ -13,6 +13,7 @@ const yaml = require('js-yaml');
 const { Profile, BEPINEX, cmpVer, parseDep } = require('./lib/profile');
 const { Nexus } = require('./lib/nexus');
 const serverList = require('./lib/manifest');
+const { ServerSync } = require('./lib/serversync');
 
 const APP_ID = 'io.github.florincamarut1.bifrost';
 const REPO_DEFAULT = 'FlorinCamarut1/bifrost';
@@ -41,7 +42,7 @@ if (!dataArg && !fs.existsSync(SETTINGS_FILE) && fs.existsSync(path.join(OLD_DAT
   migrated = true;
 }
 const DEFAULTS = {
-  role: null, adminFolder: null, adminSource: 'tmm',
+  role: null, adminFolder: null, adminSource: 'tmm', syncConfigs: true, syncAllMods: true, pullServerMods: true,
   autoSync: true, startWithWindows: null, notifications: true, quietSeconds: 45, retryMinutes: 5,
   server: '', container: 'valheim', profile: 'Default', tokenEnc: null,
   manifestRepo: REPO_DEFAULT, autoPublish: true, publishAddress: false, serverName: 'Server', serverWorld: '', addresses: '',
@@ -281,7 +282,7 @@ function runProcess(kind, label, cmd, args, opts = {}) {
 }
 const runSync = (kind, label, args) => runProcess(kind, label, 'powershell.exe',
   ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SYNC(), '-Profile', settings.profile, '-Server', settings.server, '-Container', settings.container,
-    ...(ownSource() ? ['-ClientPlugins', pluginsDir(), '-SkipDoorstop'] : []), ...args]);
+    ...(ownSource() ? ['-ClientPlugins', pluginsDir(), '-SkipDoorstop'] : []), ...(ownSource() && settings.syncAllMods ? ['-AllMods'] : []), ...args]);
 
 function summarize(lines) {
   const strip = s => s.replace(/^\s+(copied|removed)\s+/, '').trim();
@@ -339,7 +340,9 @@ async function syncNow(reason) {
     setWatch('idle', 'la zi');
     // the server runs these mods now -> players may get them
     schedulePublish('mods sincronizate');
+    setTimeout(() => twoWay('după sincronizare'), 2000);
   } else if (code === 10) {
+    setTimeout(() => twoWay('după sincronizare'), 2000);
     watch.lastResult = { kind: 'wait', text: 'Moduri copiate - restartul așteaptă să iasă jucătorii', what: r.what };
     watch.retryAt = Date.now() + settings.retryMinutes * 60e3;
     if (r.copied.length || r.removed.length || manual)
@@ -430,6 +433,63 @@ async function pollStatus() {
   polling = false;
   send('status', status); updateTray();
   if (status.joinCode && status.joinCode !== prevCode && !status.codeBroken && prevCode !== undefined) schedulePublish('join code nou');
+}
+
+// ---------- two-way: configs + mods put on the server by hand ----------
+let twoWayBusy = false;
+const serverSync = () => new ServerSync({ server: settings.server, container: settings.container, profileDir: getProfile().dir, stateFile: path.join(DATA, 'config-sync.json'), log });
+async function twoWay(reason) {
+  if (!ownSource() || !settings.server || twoWayBusy || job || !(settings.syncConfigs || settings.pullServerMods)) return;
+  twoWayBusy = true;
+  const ss = serverSync(), pr = getProfile(), res = { at: Date.now(), push: 0, pull: 0, mods: [], error: null };
+  try {
+    if (settings.pullServerMods) {
+      // mods on the server that the sync did not put there and the profile does not have
+      const st = readState(), have = new Set(Object.keys(pr.packages));
+      const extras = (await ss.remotePlugins()).filter(n => !have.has(n) && !st.installed.includes(n) && !BUILTIN.test(n));
+      for (const e of extras) {
+        if (job) break;
+        const m = e.match(/^(.+?)-(\d+\.\d+\.\d+)$/), full = m ? m[1] : e, ver = m ? m[2] : null;
+        setJob({ kind: 'pull', label: `Aduc de pe server: ${e}`, started: Date.now() });
+        try {
+          if (pr.packages[full]) {
+            // the same mod under a hand-made folder name: keep ours, drop the duplicate
+            await ss.removeRemotePlugin(e);
+            log(`Pe server era și ${e} (pus de mână) - îl înlocuiesc cu ${full} din profil`);
+          } else if (catalogIndex.get(full)) {
+            await installThunderstore({ key: full, full, ver: ver || catalogIndex.get(full).ver, role: 'user', title: catalogIndex.get(full).name }, new Set());
+            await ss.removeRemotePlugin(e);
+            log(`Adus de pe server: ${full} ${ver || ''} (din Thunderstore)`, 'done');
+          } else {
+            const tmp = path.join(DATA, 'cache', 'tmp', `srv-${Date.now()}`);
+            const src = await ss.fetchPlugin(e, tmp);
+            pr.importManual(e, src, { ver: '', role: 'user', source: 'manual', title: e });
+            fs.rmSync(tmp, { recursive: true, force: true });
+            log(`Adus de pe server: ${e} (manual)`, 'done');
+          }
+          sideHints[full] = 'server';
+          res.mods.push(full);
+        } finally { setJob(null); }
+      }
+      if (res.mods.length) {
+        // mods that live on the server are server mods; the next sync takes them over
+        const st2 = readState();
+        for (const n of res.mods) st2.mods[n] = 'server';
+        for (const n of Object.keys(sideHints)) if (res.mods.includes(n)) delete sideHints[n];
+        st2.raw.mods = st2.mods; if (!st2.raw.installed) st2.raw.installed = st2.installed;
+        fs.writeFileSync(STATE_FILE(), JSON.stringify(st2.raw, null, 2));
+        notify('Moduri aduse de pe server', res.mods.join(', '));
+        send('mods', modsPayload());
+      }
+    }
+    if (settings.syncConfigs) {
+      const r = await ss.syncConfigs();
+      res.push = r.push.length; res.pull = r.pull.length;
+      if (r.push.length) log(`Configurări trimise pe server (${reason}): ${r.push.join(', ')}`, 'done');
+      if (r.pull.length) log(`Configurări aduse de pe server (${reason}): ${r.pull.join(', ')}`, 'done');
+    }
+  } catch (e) { res.error = e.message; log(`Sincronizarea configurărilor: ${e.message}`, 'error'); }
+  finally { twoWayBusy = false; watch.twoWay = res; send('watch', watch); }
 }
 
 // ---------- server list for players (GitHub) ----------
@@ -805,6 +865,7 @@ async function importFromTmm() {
     if (fs.existsSync(cfg)) fs.cpSync(cfg, path.join(pr.dir, 'BepInEx', 'config'), { recursive: true, force: true });
     settings.adminSource = 'bifrost'; saveSettings();
     seenSig = signature(); syncedSig = seenSig;
+    setTimeout(() => twoWay('după import'), 3000);
     log(`■ Import gata: ${Object.keys(pr.packages).length} pachete în profilul Bifrost (+ configurările tale)`, 'done');
     return { ok: true, count: Object.keys(pr.packages).length };
   } catch (e) { log(`■ Importul a eșuat: ${e.message}`, 'error'); return { ok: false, error: e.message }; }
@@ -974,7 +1035,7 @@ ipcMain.handle('init', () => ({
   version: app.getVersion(),
 }));
 const SETTABLE = ['autoSync', 'startWithWindows', 'notifications', 'quietSeconds', 'retryMinutes', 'server', 'container', 'profile',
-  'manifestRepo', 'autoPublish', 'publishAddress', 'serverName', 'serverWorld', 'gameDir', 'adminFolder', 'addresses'];
+  'manifestRepo', 'autoPublish', 'publishAddress', 'syncConfigs', 'syncAllMods', 'pullServerMods', 'serverName', 'serverWorld', 'gameDir', 'adminFolder', 'addresses'];
 ipcMain.handle('action', (_e, name, arg) => action(name, arg));
 async function action(name, arg) {
   switch (name) {
@@ -1008,6 +1069,7 @@ async function action(name, arg) {
     case 'setSide': return setSide(arg.name, arg.side);
     case 'refresh': pollStatus(); send('mods', modsPayload()); return { ok: true };
     case 'publishList': return publishList('manual');
+    case 'twoWay': await twoWay('manual'); return { ok: !watch.twoWay?.error, ...(watch.twoWay || {}) };
     case 'previewList': return { ok: true, list: buildList() };
     case 'nexusLink': {
       // admin: tie a manually installed mod to its Nexus page so players can get it
@@ -1141,6 +1203,7 @@ app.whenReady().then(async () => {
     seenSig = signature();
     if (settings.autoSync) setTimeout(() => syncNow('pornire'), 4000); else setWatch('off', 'auto-sync oprit');
     setInterval(tick, 5000);
+    setInterval(() => twoWay('verificare periodică'), 3 * 60e3);
     pollStatus();
     setInterval(() => { if (win && win.isVisible()) pollStatus(); }, 20000);
     setInterval(() => { if (!win || !win.isVisible()) pollStatus(); }, 120000);

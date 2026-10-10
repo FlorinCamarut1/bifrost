@@ -120,6 +120,7 @@
             <label class="switch right"><input type="checkbox" id="tg-autosync"><span></span>Auto-sync</label>
           </div>
           <div class="dry small" id="dry-result" hidden></div>
+          <div class="muted small" id="twoway-line" style="margin-top:12px"></div>
         </div>
 
         <div class="card">
@@ -271,6 +272,9 @@
         <label class="setting"><div><b>Container</b></div><input data-set="container" class="txt"></label>
         <label class="setting"><div><b>Profil Thunderstore</b></div><input data-set="profile" class="txt"></label>
         <label class="setting"><div><b>Lista pentru prieteni</b><small>Repo GitHub public (publicat cu GitHub CLI, <code>gh</code>).</small></div><input data-set="manifestRepo" class="txt"></label>
+        <label class="setting"><div><b>Toate modurile pe server</b><small>Și cele de client. Pentru prieteni, Server/Client hotărăște doar ce e obligatoriu și ce e recomandat.</small></div><span class="switch"><input type="checkbox" data-set="syncAllMods"><span></span></span></label>
+        <label class="setting"><div><b>Sincronizează configurările</b><small>BepInEx/config ↔ server, în ambele sensuri: ce schimbi la tine pleacă pe server, ce se schimbă pe server (ex. din joc) vine la tine.</small></div><span class="switch"><input type="checkbox" data-set="syncConfigs"><span></span></span></label>
+        <label class="setting"><div><b>Adu modurile puse direct pe server</b><small>Ce găsesc pe server și nu e în profil îl aduc la tine și apoi îl gestionez eu.</small></div><span class="switch"><input type="checkbox" data-set="pullServerMods"><span></span></span></label>
         <label class="setting"><div><b>Publică și IP-ul serverului</b><small>Lista e publică pe GitHub. Fără IP prietenii intră cu join code-ul; IP-ul îl poți da pe Discord.</small></div><span class="switch"><input type="checkbox" data-set="publishAddress"><span></span></span></label>
         <label class="setting"><div><b>Folderul de admin</b><small>Cel cu sync-valheim-mods.ps1, mods.json, modpack.</small></div><input data-set="adminFolder" class="txt"></label>
       </div>
