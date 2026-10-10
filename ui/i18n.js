@@ -119,6 +119,8 @@
     'Token șters.': 'Token removed.', 'Catalog actualizat.': 'Catalog updated.', 'Legătură scoasă.': 'Link removed.', 'Serverul nu are încă o listă publicată.': 'The server has no published list yet.',
     'Lista nu e publicată încă.': 'The list is not published yet.', 'lista nu e publicată încă': 'the list is not published yet', 'fără conexiune - doar lista': 'no connection - list only',
     'Toate modurile sunt la ultima versiune.': 'All mods are at the latest version.', 'Totul e la zi.': 'Everything is up to date.', 'Bifrost 1.1': 'Bifrost 1.1',
+    // ---- update ----
+    'Update': 'Update', 'Verifică acum': 'Check now', 'Repornește și actualizează': 'Restart and update', 'Descarcă': 'Download', 'Bifrost': 'Bifrost',
     // ---- main process ----
     'Deschide Bifrost': 'Open Bifrost', 'Copiază join code': 'Copy join code', 'Ieșire': 'Quit', 'Instalat de pe Nexus': 'Installed from Nexus', 'Moduri aduse de pe server': 'Mods brought from the server',
     'Moduri copiate pe server': 'Mods copied to the server', 'Serverul Valheim e actualizat': 'The Valheim server is updated', 'Bifrost: sincronizare oprită': 'Bifrost: sync stopped',
@@ -149,7 +151,12 @@
     [/^Copiat: (.+)$/, 'Copied: $1'], [/^Join code copiat: (.+)$/, 'Join code copied: $1'], [/^(.+) instalat\.$/, '$1 installed.'], [/^(.+) instalat\. Pornește-l cu JOACĂ\.$/, '$1 installed. Start it with PLAY.'],
     [/^Server repornit\. Join code: (.+)$/, 'Server restarted. Join code: $1'], [/^(\d+) moduri actualizate - sincronizez serverul\.$/, '$1 mods updated - syncing the server.'],
     [/^Ștergi „(.+)” din Bifrost\?$/, 'Remove "$1" from Bifrost?'], [/^Versiunea (.+) e gata - repornește Bifrost ca s-o folosești\.$/, 'Version $1 is ready - restart Bifrost to use it.'],
-    [/^Bifrost (\S+) · (\d+) servere$/, 'Bifrost $1 · $2 servers'], [/^Bifrost (\S+) \(din sursă\) · (\d+) servere$/, 'Bifrost $1 (from source) · $2 servers'],
+    [/^Bifrost (\S+) · (\d+) servere$/, 'Bifrost $1 · $2 servers'],
+    [/^Ai ultima versiune · verificat (.+)$/, m => 'You have the latest version · checked ' + t(m.replace(/^Ai ultima versiune · verificat /, ''))],
+    [/^Versiunea (\S+) e descărcată - repornește ca s-o folosești\.$/, 'Version $1 is downloaded - restart to use it.'], [/^Se descarcă versiunea (\S+)\.\.\.$/, 'Downloading version $1...'],
+    [/^Versiunea (\S+) e disponibilă\. Rulezi din sursă: (.+)$/, 'Version $1 is available. You run from source: get the portable build from GitHub to get automatic updates.'],
+    [/^Versiunea (\S+) are nevoie de installer-ul nou\.$/, 'Version $1 needs the new installer.'], [/^nu am putut verifica: (.+)$/, 'could not check: $1'],
+    [/^Se descarcă Bifrost (\S+)\.\.\.$/, 'Downloading Bifrost $1...'], [/^Bifrost (\S+) \(din sursă\) · (\d+) servere$/, 'Bifrost $1 (from source) · $2 servers'],
   ];
   const norm = s => s.replace(/\s+/g, ' ').trim();
   function t(s) {

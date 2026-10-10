@@ -65,7 +65,7 @@ const slug = s => String(s || 'server').toLowerCase().normalize('NFD').replace(/
 
 const GLOBAL_DEFAULTS = {
   lang: null, notifications: true, startWithWindows: null, gameDir: null, shortcutsV2: false,
-  nexusKeyEnc: null, nexusUser: null, githubTokenEnc: null, githubUser: null, activeServer: null, servers: [],
+  nexusKeyEnc: null, nexusUser: null, githubTokenEnc: null, githubUser: null, activeServer: null, servers: [], shortcutTarget: null,
 };
 const SERVER_DEFAULTS = {
   id: '', name: 'Server', role: 'player', list: null, profileDir: null, createdAt: 0,
@@ -224,19 +224,30 @@ const devShortcut = extraArgs => ({
   icon: path.join(__dirname, 'ui', 'app.ico'), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Valheim',
 });
 const startMenu = () => path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+// the shortcut for whichever Bifrost runs: from source (electron.exe + folder) or a build (Bifrost.exe, portable or installed)
+const ownShortcut = extraArgs => app.isPackaged
+  ? { target: process.execPath, args: extraArgs || '', cwd: path.dirname(process.execPath), icon: path.join(process.resourcesPath, 'app.ico'), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Valheim' }
+  : devShortcut(extraArgs);
 function applyStartup() {
   try {
-    if (app.isPackaged) { app.setLoginItemSettings({ openAtLogin: !!G.startWithWindows, args: ['--hidden'] }); return; }
     const lnk = path.join(startMenu(), 'Startup', 'Bifrost.lnk');
+    if (app.isPackaged) {
+      app.setLoginItemSettings({ openAtLogin: !!G.startWithWindows, args: ['--hidden'] });
+      if (fs.existsSync(lnk)) fs.unlinkSync(lnk);   // left over from running from source
+      return;
+    }
     if (G.startWithWindows) shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? 'replace' : 'create', devShortcut('--hidden'));
     else if (fs.existsSync(lnk)) fs.unlinkSync(lnk);
   } catch (e) { log(`autostart: ${e.message}`); }
 }
-function devShortcuts() {
+// Desktop + Start menu point at the Bifrost that runs now (the Start menu one carries the AppUserModelID notifications need)
+function ensureShortcuts() {
+  const target = app.isPackaged ? process.execPath : `${process.execPath}|${__dirname}`;
+  if (G.shortcutTarget === target) return;
   for (const l of [path.join(startMenu(), 'Bifrost.lnk'), path.join(app.getPath('desktop'), 'Bifrost.lnk')]) {
-    try { shell.writeShortcutLink(l, fs.existsSync(l) ? 'replace' : 'create', devShortcut('')); } catch (e) { log(`shortcut ${l}: ${e.message}`); }
+    try { shell.writeShortcutLink(l, fs.existsSync(l) ? 'replace' : 'create', ownShortcut('')); } catch (e) { log(`shortcut ${l}: ${e.message}`); }
   }
-  G.shortcutsV2 = true; saveSettings();
+  G.shortcutTarget = target; G.shortcutsV2 = true; saveSettings();
 }
 function registerProtocols() {
   for (const p of ['bifrost', ...(G.nexusKeyEnc ? ['nxm'] : [])]) {
@@ -1115,18 +1126,23 @@ async function handleLink(url) {
 // APP UPDATES (code bundles, see lib/codeupdate.js)
 // =====================================================================================================
 let appUpdate = null;
+let updateBusy = false;
 async function checkAppUpdate() {
+  if (updateBusy) return;
+  updateBusy = true;
   try {
     const r = await codeupdate.check({ fetch: fetchN, repo: REPO, current: OWN_VERSION, electronMajor: ELECTRON_MAJOR });
-    if (!r.newer) return;
-    if (r.needsInstaller || !app.isPackaged) { appUpdate = { version: r.latest, ready: false, installer: true, page: r.page }; send('appUpdate', appUpdate); return; }
+    const base = { current: OWN_VERSION, latest: r.latest, checkedAt: Date.now(), source: !app.isPackaged, page: r.page || `https://github.com/${REPO}/releases/latest` };
+    if (!r.newer) { if (!appUpdate?.ready) { appUpdate = { ...base, upToDate: true }; send('appUpdate', appUpdate); } return; }
+    if (r.needsInstaller || !app.isPackaged) { appUpdate = { ...base, version: r.latest, ready: false, installer: true }; send('appUpdate', appUpdate); return; }
     if (appUpdate?.ready && appUpdate.version === r.latest) return;
-    appUpdate = { version: r.latest, ready: false }; send('appUpdate', appUpdate);
+    appUpdate = { ...base, version: r.latest, ready: false, downloading: true }; send('appUpdate', appUpdate);
     await codeupdate.install({ download: (u, f, size) => new Profile({ dir: path.join(DATA, 'app'), cacheDir: path.join(DATA, 'app'), fetch: fetchN }).download(u, f, null, size), appData: app.getPath('appData'), version: r.latest, bundle: r.bundle, electronMajor: ELECTRON_MAJOR });
-    appUpdate = { version: r.latest, ready: true }; send('appUpdate', appUpdate);
+    appUpdate = { ...base, version: r.latest, ready: true }; send('appUpdate', appUpdate);
     log(`Bifrost ${r.latest} descărcat - se folosește la următoarea pornire`, 'done');
     notify('Bifrost', `Versiunea ${r.latest} e gata - repornește Bifrost ca s-o folosești.`);
-  } catch (e) { log(`update: ${e.message}`); }
+  } catch (e) { log(`update: ${e.message}`); appUpdate = { ...(appUpdate || {}), current: OWN_VERSION, error: e.message, checkedAt: Date.now() }; send('appUpdate', appUpdate); }
+  finally { updateBusy = false; }
 }
 
 // =====================================================================================================
@@ -1307,7 +1323,7 @@ app.whenReady().then(async () => {
     if (!name || name.includes('..') || /[\\/]/.test(name)) return new Response('', { status: 404 });
     return net.fetch(pathToFileURL(path.join(pluginsDir(), name, 'icon.png')).toString());
   });
-  if (!app.isPackaged && !G.shortcutsV2 && !dataArg) devShortcuts();
+  if (!dataArg) ensureShortcuts();
   if (!dataArg) { applyStartup(); registerProtocols(); }
   createTray();
   createWindow(!process.argv.includes('--hidden'));

@@ -867,7 +867,16 @@ $('#btn-gh-clear').onclick = async () => { await window.vp.act('setGithubToken',
 // ---------- app update ----------
 function renderAppUpdate() {
   const u = S.appUpdate, el = $('#app-update');
-  if (!u) { el.hidden = true; return; }
+  // the Update card in Settings
+  $('#upd-title').textContent = `Bifrost ${u?.current || S.settings.version || ''}`;
+  $('#upd-state').textContent = !u ? 'se verifică...' : u.error ? `nu am putut verifica: ${u.error}`
+    : u.ready ? `Versiunea ${u.version} e descărcată - repornește ca s-o folosești.`
+      : u.downloading ? `Se descarcă versiunea ${u.version}...`
+        : u.installer ? (u.source ? `Versiunea ${u.version} e disponibilă. Rulezi din sursă: ia varianta portabilă de pe GitHub ca să primești update-uri automate.` : `Versiunea ${u.version} are nevoie de installer-ul nou.`)
+          : `Ai ultima versiune · verificat ${ago(u.checkedAt)}`;
+  $('#btn-upd-go').hidden = !u?.ready;
+  $('#btn-upd-dl').hidden = !u?.installer;
+  if (!u || u.upToDate || u.error) { el.hidden = true; return; }
   el.hidden = false;
   el.innerHTML = u.installer ? `<b>Bifrost ${esc(u.version)}</b> e disponibil.<button class="btn small primary" id="btn-app-dl">Descarcă</button>`
     : u.ready ? `<b>Bifrost ${esc(u.version)}</b> e gata.<button class="btn small primary" id="btn-app-update">Repornește și actualizează</button>` : `Se descarcă Bifrost ${esc(u.version)}...`;
@@ -893,6 +902,10 @@ function applyLang() {
     i18nObs.observe(document.body, { childList: true, subtree: true, characterData: true });
   }
 }
+
+$('#btn-upd-check').onclick = async () => { $('#btn-upd-check').disabled = true; $('#upd-state').textContent = 'se verifică...'; await window.vp.act('checkAppUpdate'); $('#btn-upd-check').disabled = false; };
+$('#btn-upd-go').onclick = () => window.vp.installUpdate();
+$('#btn-upd-dl').onclick = () => window.vp.act('open', S.appUpdate?.page || 'https://github.com/FlorinCamarut1/bifrost/releases/latest');
 
 // ---------- events from main ----------
 window.vp.on((ch, d) => {
