@@ -1,0 +1,70 @@
+{
+  "name": "bifrost",
+  "productName": "Bifrost",
+  "version": "1.0.0",
+  "description": "Valheim mod manager and server companion",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --publish never",
+    "release": "electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "7zip-bin": "^5.2.0",
+    "dompurify": "^3.4.16",
+    "electron-updater": "^6.8.9",
+    "js-yaml": "4.1.0",
+    "marked": "^17.0.6"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "author": "Florin Camarut",
+  "license": "MIT",
+  "repository": "https://github.com/FlorinCamarut1/bifrost",
+  "build": {
+    "appId": "io.github.florincamarut1.bifrost",
+    "productName": "Bifrost",
+    "files": [
+      "main.js",
+      "preload.js",
+      "catalog-worker.js",
+      "lib/**",
+      "ui/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/7zip-bin/win/**",
+      "catalog-worker.js"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "ui/app.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Bifrost",
+      "artifactName": "Bifrost-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "FlorinCamarut1",
+        "repo": "bifrost",
+        "releaseType": "release"
+      }
+    ]
+  }
+}
