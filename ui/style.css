@@ -83,7 +83,8 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .1em; color: va
   background: radial-gradient(500px 200px at 0% 0%, #e6c47714, transparent 70%), linear-gradient(180deg, var(--panel2), var(--panel)); }
 .hero::after { content: "ᛉ"; position: absolute; right: 30%; top: -40px; font-size: 220px; color: #e6c4770a; font-family: var(--serif); pointer-events: none; }
 .hero-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-.server-name { font-size: 40px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold2); text-shadow: 0 0 30px #e6c47733; }
+.server-name { font-size: 40px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold2); text-shadow: 0 0 30px #e6c47733;
+  overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .joincode { text-align: center; padding: 14px 22px; border-radius: 14px; background: #0b1020aa; border: 1px solid var(--line2); min-width: 210px; }
 .joincode .code { font-family: var(--mono); font-size: 34px; letter-spacing: .16em; color: var(--gold2); margin: 4px 0 8px; font-weight: 600; }
 .joincode.off .code { color: var(--muted); }

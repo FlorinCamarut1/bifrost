@@ -126,6 +126,53 @@
     'Nexus nu spune dacă un mod e de server sau de client - citește descrierea de pe Nexus.': 'Nexus does not say whether a mod is server or client - read its description on Nexus.',
     'După instalare îl marchezi la': 'After installing, mark it under', '(Server / Client).': '(Server / Client).', 'Doar arhivele .zip și .7z se pot instala automat.': 'zip, 7z, rar and bare DLLs install automatically.',
     'endorsements': 'endorsements', 'Fișiere': 'Files', 'Niciun fișier activ.': 'No active files.',
+    // ---- 1.6 review ----
+    "Reîncerc în 5 minute.": "Retrying in 5 minutes.",
+    "Repornește serverul din panoul hostului ca să le încarce.": "Restart the server from the host's panel to load them.",
+    "Apasă Restart server când nu e nimeni.": "Press Restart server when nobody is on.",
+    "necesită atenție": "needs attention",
+    "Jurnalul": "Log file",
+    "Nu l-am găsit prin Steam - scrie aici folderul care conține valheim.exe.": "Not found through Steam - type the folder that contains valheim.exe here.",
+    "Valheim e fără moduri acum.": "Valheim has no mods right now.",
+    "Pentru publicarea listei (un Gist privat pe contul tău). Merge și GitHub CLI (": "To publish the list (a secret Gist on your account). The GitHub CLI (",
+    "), dacă e logat.": ") works too, if it is logged in.",
+    " - lista e un Gist privat pe contul tău.": " - the list is a secret Gist on your account.",
+    "Publicarea urcă o versiune nouă (patch +1). Apare în mod manager la prieteni în cam o oră.": "Publishing uploads a new version (patch +1). It shows up in friends' mod managers in about an hour.",
+    "Ca să public direct din app, pune un token de echipă Thunderstore în": "To publish straight from the app, put a Thunderstore team token in",
+    ". Fără token: construiește zip-ul și urcă-l pe thunderstore.io/c/valheim/create.": ". Without a token: build the zip and upload it on thunderstore.io/c/valheim/create.",
+    "Bifrost-ul prietenilor citește lista asta și le instalează exact modurile serverului.": "Your friends' Bifrost reads this list and installs exactly the server's mods.",
+    "Vine din imaginea serverului (VALHEIM_PLUS=true)": "Comes with the server's image (VALHEIM_PLUS=true)",
+    "instalat manual": "installed by hand",
+    "Nu e din Thunderstore / Nexus.": "Not from Thunderstore / Nexus.",
+    "Modurile sunt deja copiate pe server, dar serverul nu a repornit încă.": "The mods are already copied to the server, but it has not restarted yet.",
+    "Repornește singur când nu e nimeni online.": "It restarts by itself when nobody is online.",
+    "Pentru instalare de pe Nexus pune-ți cheia în": "To install from Nexus, put your key in",
+    ". Căutarea merge și fără.": ". Search works without it.",
+    "Pune întâi cheia Nexus în Setări → Nexus Mods.": "Put your Nexus key in Settings → Nexus Mods first.",
+    "Nexus nu spune dacă un mod e de server sau de client - citește descrierea de pe Nexus.": "Nexus does not say whether a mod is for the server or the client - read the description on Nexus.",
+    "După instalare îl marchezi la": "After installing, mark it in",
+    "(Server / Client).": "(Server / Client).",
+    "Se instalează zip, 7z, rar și DLL-uri simple.": "zip, 7z, rar and bare DLLs can be installed.",
+    "Nu e niciun mod în profil (gol sau șters?) - nu schimb nimic pe server.": "There are no mods in the profile (empty or deleted?) - nothing is changed on the server.",
+    "eroare - reîncerc": "error - retrying",
+    "așteaptă restart manual": "waiting for a manual restart",
+    "Nu e instalat.": "Not installed.",
+    "Lucrez deja - încearcă în câteva secunde.": "Already working - try again in a few seconds.",
+    "Profilul nu are moduri de server - nu public lista.": "The profile has no server mods - the list is not published.",
+    "Profil personal": "Personal profile",
+    "Modurile le alegi tu, din Descoperă.": "You pick the mods yourself, in Discover.",
+    "stare necunoscută": "state unknown",
+    "necunoscută încă (apare după ce pornește serverul)": "not known yet (shows up once the server has started)",
+    "Bifrost nu poate reporni serverul ăsta - repornește-l din panoul hostului.": "Bifrost cannot restart this server - restart it from the host's panel.",
+    "Un join code nou se cere doar la serverele Docker (valheim-server); aici repornește serverul din panoul hostului.": "A new join code can only be requested from Docker servers (valheim-server); here, restart the server from the host's panel.",
+    "Sincronizarea a adus între timp altă versiune a fișierului de pe server - l-am reîncărcat, fă modificarea din nou.": "Meanwhile the sync brought another version of the file from the server - it was reloaded, make the change again.",
+    "Moduri copiate - repornește serverul din panoul hostului": "Mods copied - restart the server from the host's panel",
+    // ---- download cache ----
+    "Cache-ul descărcărilor": "Download cache",
+    "Modurile descărcate, ca reinstalările și profilurile noi să nu le mai descarce. Versiunile vechi se șterg singure.": "Downloaded mods, so reinstalls and new profiles do not download them again. Old versions are removed by themselves.",
+    "Golește": "Empty",
+    "Golești cache-ul?": "Empty the cache?",
+    "Modurile instalate rămân. Doar fișierele descărcate se șterg - la o reinstalare se descarcă din nou.": "Installed mods stay. Only the downloaded files are deleted - a reinstall downloads them again.",
     // ---- BepInEx console ----
     "Consola BepInEx": "BepInEx console",
     "Fereastra neagră de lângă joc. Jurnalul complet rămâne oricum în BepInEx/LogOutput.log.": "The black window next to the game. The full log stays in BepInEx/LogOutput.log anyway.",
@@ -203,6 +250,20 @@
     'Nu găsesc Valheim (Steam). Alege folderul jocului în Setări.': 'Valheim not found (Steam). Choose the game folder in Settings.',
   };
   const PATTERNS = [
+    [/^Repornit - join code (\d+)$/, 'Restarted - join code $1'],
+    [/^acest PC: (.+)$/, 'this PC: $1'],
+    [/^Prietenii îl iau de pe Nexus \((.*)\)$/, 'Friends get it from Nexus ($1)'],
+    [/^\(listă din cache: (.+)\)$/, (m, e) => `(list from the cache: ${t(e)})`],
+    [/^\.\.\. și încă (\d+)$/, '... and $1 more'],
+    [/^Nexus nu răspunde: (.+)$/, 'Nexus does not answer: $1'],
+    [/^Eroare: (.+)$/, (m, e) => 'Error: ' + t(e)],
+    [/^reîncerc la (\S+)( \(serverul repornește când e gol\))?$/, (m, c, x) => `retrying at ${c}${x ? ' (the server restarts when it is empty)' : ''}`],
+    [/^Profil personal: (\d+) (pachet|pachete)$/, (m, n) => `Personal profile: ${n} ${n === '1' ? 'package' : 'packages'}`],
+    [/^Catalogul Thunderstore pentru Valheim · (.+) moduri · actualizat (.+)$/, (m, n, w) => `The Thunderstore catalog for Valheim · ${n} mods · updated ${t(w)}`],
+    [/^✓ Instalat din (Thunderstore|Nexus)$/, '✓ Installed from $1'], [/^Instalat din (Thunderstore|Nexus): (.+)$/, 'Installed from $1: $2'],
+    [/^E deja instalat: (.+?)(?: \(din (.+?)\))? are același (.+)\. Nu îl pun de două ori\.$/, (m, a, w, d) => `Already installed: ${a}${w ? ` (from ${w === 'instalare manuală' ? 'a manual install' : w})` : ''} has the same ${d}. It is not installed twice.`],
+    [/^(\S+ [MG]B) în (\d+) fișiere\. Versiunile vechi se șterg singure; „Golește” le scoate pe toate \(se descarcă din nou la nevoie\)\.$/, '$1 in $2 files. Old versions are removed by themselves; “Empty” removes them all (downloaded again when needed).'],
+    [/^Cache golit \((\S+ [MG]B)\)\.$/, 'Cache emptied ($1).'],
     [/^Acum: (.+?)( cu parola salvată)?\. Alegi caracterul, apeși Start și ești pe server\.$/, (m, a, p) => `Now: ${a}${p ? ' with the saved password' : ''}. Pick the character, press Start and you are on the server.`],
     [/^Nu știu adresa serverului, așa că am copiat join code-ul (\d+): în joc Join game → Add server → Ctrl\+V\.$/, "The server's address is not known, so the join code $1 was copied: in the game Join game → Add server → Ctrl+V."],
     [/^Configurare \((\d+) fișiere?\)$/, (m, n) => `Config (${n} ${n === '1' ? 'file' : 'files'})`],
@@ -247,7 +308,8 @@
     if (!s) return s;
     const k = norm(s);
     if (!k) return s;
-    const lead = s.match(/^\s*/)[0], trail = s.match(/\s*$/)[0];
+    const lead = s.match(/^\s*/)[0], trail = s.match(/(\s+·)?\s*$/)[0];
+    if (trail.includes('·')) { const inner = t(s.slice(0, s.length - trail.length)); if (inner !== s.slice(0, s.length - trail.length)) return inner + trail; }
     if (EN[k] !== undefined) return lead + EN[k] + trail;
     for (const [re, rep] of PATTERNS) if (re.test(k)) return lead + k.replace(re, rep) + trail;
     // "a · b · c": each part on its own

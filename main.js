@@ -26,6 +26,8 @@ const perf = m => { if (PERF) console.log(`[perf] ${Math.round(process.uptime() 
 perf('main.js loaded');
 // AppImage: Chromium's setuid sandbox helper cannot work from the read-only mount (and Ubuntu 24.04 blocks the other one)
 if (LINUX && process.env.APPIMAGE) app.commandLine.appendSwitch('no-sandbox');
+// Chromium's HTTP cache (Discover icons, API answers) stays small; mod files have their own cache
+app.commandLine.appendSwitch('disk-cache-size', String(100 * 1024 * 1024));
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
@@ -33,7 +35,7 @@ const { Profile, BEPINEX, cmpVer, parseDep } = require('./lib/profile');
 const { Nexus } = require('./lib/nexus');
 const { build: buildServerList } = require('./lib/manifest');
 const listhost = require('./lib/listhost');
-const { makeTransport, walk } = require('./lib/transport');
+const { makeTransport, walk, normSha } = require('./lib/transport');
 const { syncMods } = require('./lib/modsync');
 const { syncConfigs, SKIP: CFG_SKIP, safeRel } = require('./lib/serversync');
 const bepcfg = require('./lib/bepcfg');
@@ -87,13 +89,27 @@ const SERVER_DEFAULTS = {
   // PLAY joins the server straight away (Valheim's +connect / -password); address empty = from the list / server logs
   directJoin: true, joinAddress: '', joinPassEnc: null,
 };
-let G = { ...GLOBAL_DEFAULTS, ...readJson(SETTINGS_FILE, {}) };
+// settings.json that does not parse (a crash while writing, a bad hand edit) is never replaced with empty defaults:
+// the last good copy (settings.json.bak, refreshed at every start) is used and the broken file is kept beside it
+const settingsNotes = [];
+function loadSettings() {
+  if (!fs.existsSync(SETTINGS_FILE)) return {};
+  const raw = readJson(SETTINGS_FILE, null);
+  if (raw && typeof raw === 'object') { try { fs.copyFileSync(SETTINGS_FILE, SETTINGS_FILE + '.bak'); } catch { } return raw; }
+  const broken = SETTINGS_FILE.replace(/\.json$/, `.broken-${Date.now()}.json`);
+  try { fs.copyFileSync(SETTINGS_FILE, broken); } catch { }
+  const bak = readJson(SETTINGS_FILE + '.bak', null);
+  settingsNotes.push(bak ? `settings.json era stricat - am folosit copia bună de la pornirea anterioară (cel stricat e păstrat ca ${path.basename(broken)})`
+    : `settings.json era stricat și nu am o copie - păstrez fișierul stricat ca ${path.basename(broken)}`);
+  return bak && typeof bak === 'object' ? bak : {};
+}
+let G = { ...GLOBAL_DEFAULTS, ...loadSettings() };
 const serverDir = id => path.join(DATA, 'servers', id);
 
 // before 1.1 there was one server, with its settings at the top level
 function migrateFlat() {
   if (Array.isArray(G.servers) && G.servers.length) return;
-  const raw = readJson(SETTINGS_FILE, null);
+  const raw = readJson(SETTINGS_FILE, null) || readJson(SETTINGS_FILE + '.bak', null);
   if (!raw || !raw.role) { G.servers = []; return; }
   const cached = readJson(path.join(DATA, 'server-list.json'), null);
   const name = raw.serverName && raw.serverName !== 'Server' ? raw.serverName : cached?.server?.name || 'Server';
@@ -157,6 +173,7 @@ const publicSettings = () => {
     ...(s ? { role: s.role, serverName: s.name, serverWorld: s.world, addresses: s.addresses, autoSync: s.autoSync, quietSeconds: s.quietSeconds,
       retryMinutes: s.retryMinutes, syncConfigs: s.syncConfigs, syncAllMods: s.syncAllMods, pullServerMods: s.pullServerMods,
       autoPublish: s.autoPublish, publishAddress: s.publishAddress, hasToken: !!s.tsTokenEnc,
+      canRestart: !!(s.conn && (s.conn.type === 'ssh-docker' || s.conn.restartCmd)), dockerServer: s.conn?.type === 'ssh-docker',
       directJoin: s.directJoin !== false, joinAddress: s.joinAddress || '', hasJoinPass: !!s.joinPassEnc, joinTarget: joinTarget() } : {}),
   };
 };
@@ -167,6 +184,7 @@ const publicSettings = () => {
 let win = null, tray = null, quitting = false;
 // a window that is still loading gets its toasts once the page is up (state comes with 'init' anyway)
 let winLoaded = false, pendingToasts = [];
+function pageReady() { winLoaded = true; for (const t of pendingToasts.splice(0)) send('toast', t); }
 const send = (ch, data) => {
   if (!win || win.isDestroyed()) return;
   if (!winLoaded) { if (ch === 'toast') pendingToasts.push(data); return; }
@@ -209,7 +227,7 @@ function createWindow(show) {
   win.removeMenu();
   winLoaded = false;
   win.webContents.on('did-start-loading', () => { winLoaded = false; });
-  win.webContents.on('did-finish-load', () => { winLoaded = true; for (const t of pendingToasts.splice(0)) send('toast', t); });
+  win.webContents.on('did-finish-load', () => pageReady());
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
   win.once('ready-to-show', () => { perf('window ready-to-show'); if (shotMode) win.showInactive(); else if (show) win.show(); });
   // test hook: --shot=<dir> --pages=a,b saves a screenshot of every page once the data is in
@@ -232,7 +250,7 @@ function createWindow(show) {
   });
   win.on('show', () => { clearTimeout(unloadTimer); pollStatus(); checkGameProcess(); });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  win.webContents.on('will-navigate', e => e.preventDefault());
+  win.webContents.on('will-navigate', (e, url) => { if (url !== win.webContents.getURL()) e.preventDefault(); });
 }
 function updateTray() {
   if (!tray) return;
@@ -244,6 +262,13 @@ function updateTray() {
 }
 function createTray() {
   tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }));
+  trayMenu();
+  tray.on('click', showWindow);
+  updateTray();
+}
+// (rebuilt when the language changes)
+function trayMenu() {
+  if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: tr('Deschide Bifrost'), click: showWindow },
     { label: tr('Joacă'), click: () => playerSync({ launch: true }) },
@@ -251,8 +276,6 @@ function createTray() {
     { type: 'separator' },
     { label: tr('Ieșire'), click: () => { quitting = true; app.quit(); } },
   ]));
-  tray.on('click', showWindow);
-  updateTray();
 }
 
 const devShortcut = extraArgs => ({
@@ -327,6 +350,55 @@ function log(line, kind = 'info') {
   try { fs.appendFileSync(LOG_FILE, `${t.toLocaleString('sv-SE')}  ${line}\n`); } catch { }
 }
 try { if (fs.statSync(LOG_FILE).size > 2e6) fs.writeFileSync(LOG_FILE, fs.readFileSync(LOG_FILE, 'utf8').split('\n').slice(-5000).join('\n')); } catch { }
+
+// ---------- download cache (cache/thunderstore, cache/nexus): reinstalls and new profiles come from here ----------
+// old versions of a mod that every profile has replaced go after 14 days, mods no profile has any more after 30
+const CACHE_DIRS = ['thunderstore', 'nexus', 'tmp'];
+function cacheStats() {
+  let bytes = 0, files = 0;
+  for (const d of CACHE_DIRS) {
+    try { for (const f of fs.readdirSync(path.join(DATA, 'cache', d))) { try { bytes += fs.statSync(path.join(DATA, 'cache', d, f)).size; files++; } catch { } } } catch { }
+  }
+  return { bytes, files };
+}
+function pruneCache() {
+  const used = new Map(), nexusUsed = new Set();   // full -> Set(ver); "modId-fileId"
+  for (const s of G.servers) {
+    const dir = s.profileDir || path.join(DATA, 'profiles', s.id);
+    const pk = readJson(path.join(dir, 'bifrost-profile.json'), {})?.packages || {};
+    for (const [k, p] of Object.entries(pk)) {
+      if (!used.has(k)) used.set(k, new Set());
+      used.get(k).add(p.ver);
+      if (p.source === 'nexus') nexusUsed.add(`${p.modId}-${p.fileId}`);
+    }
+  }
+  const now = Date.now(), DAY = 864e5;
+  let freed = 0, n = 0;
+  const drop = f => { try { const st = fs.statSync(f); fs.rmSync(f, { recursive: true, force: true }); freed += st.size || 0; n++; } catch { } };
+  const tsDir = path.join(DATA, 'cache', 'thunderstore');
+  try {
+    for (const f of fs.readdirSync(tsDir)) {
+      const m = f.match(/^(.+)-(\d+\.\d+\.\d+)\.zip$/), p = path.join(tsDir, f);
+      let age = 0; try { age = now - fs.statSync(p).mtimeMs; } catch { continue; }
+      if (/\.part$/.test(f)) { if (age > DAY) drop(p); continue; }
+      if (!m) continue;
+      const vers = used.get(m[1]);
+      if (vers ? !vers.has(m[2]) && age > 14 * DAY : age > 30 * DAY) drop(p);
+    }
+  } catch { }
+  const nxDir = path.join(DATA, 'cache', 'nexus');
+  try {
+    for (const f of fs.readdirSync(nxDir)) {
+      const m = f.match(/^(\d+-\d+)-/), p = path.join(nxDir, f);
+      let age = 0; try { age = now - fs.statSync(p).mtimeMs; } catch { continue; }
+      if (!(m && nexusUsed.has(m[1])) && age > 30 * DAY) drop(p);
+    }
+  } catch { }
+  // leftovers of interrupted unpacks
+  const tmp = path.join(DATA, 'cache', 'tmp');
+  try { for (const f of fs.readdirSync(tmp)) { const p = path.join(tmp, f); try { if (now - fs.statSync(p).mtimeMs > DAY) drop(p); } catch { } } } catch { }
+  if (n) log(`Cache: am scos ${n} descărcări vechi (${Math.round(freed / 1048576)} MB)`);
+}
 
 // =====================================================================================================
 // PROFILE + JOBS (shared)
@@ -763,6 +835,7 @@ async function maybeRestart({ manual, what = '', force } = {}) {
     return { ok: true };
   }
   if (!tr.canRestart) {
+    st.restartPending = false; writeState(st);
     watch.lastResult = { kind: 'wait', text: 'Moduri copiate - repornește serverul din panoul hostului', what };
     notify('Moduri copiate pe server', `${what}\nRepornește serverul din panoul hostului ca să le încarce.`.trim());
     setWatch('waiting', 'așteaptă restart manual');
@@ -855,8 +928,8 @@ async function pollStatus() {
       if (!st) {
         // no process view (plain SSH, local, FTP): the Steam query says if it is up and who plays
         st = { reachable: true, checkedAt: Date.now(), container: 'running' };
-        try { const i = await (async () => { const a = a2s.parseAddress((s.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean)); return a ? a2s.info(a.host, a.queryPort) : null; })(); if (i) { st.players = i.players; st.gameUp = true; st.idle = i.players === 0; } }
-        catch { st.gameUp = false; }
+        try { const i = await (async () => { const a = a2s.parseAddress((s.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean)); return a ? a2s.info(a.host, a.queryPort) : null; })(); if (i) { st.players = i.players; st.gameUp = true; st.idle = i.players === 0; } else st.unknown = true; }
+        catch { st.unknown = true; }   // (crossplay servers do not answer the Steam query either)
       }
       status = st;
     } else if (s.role === 'player') {
@@ -956,6 +1029,13 @@ async function saveConfig({ rel, changes, text, expect }) {
   if (expect && sha1(cur) !== expect) throw new Error('Fișierul s-a schimbat între timp (l-a adus sincronizarea de pe server) - l-am reîncărcat, fă modificarea din nou.');
   const next = typeof text === 'string' ? text : bepcfg.apply(cur, changes || []);
   if (next === cur) return { ok: true, unchanged: true };
+  // the version that was edited becomes the sync's common base when there is none yet (a file never synced): then
+  // the sync sees a local change and sends it, instead of treating it as a first contact where the server wins
+  const s0 = srv();
+  if (isAdmin() && s0?.conn && s0.syncConfigs) {
+    const sf = path.join(serverDir(s0.id), 'config-sync.json'), base = readJson(sf, {});
+    if (!base[rel]) { base[rel] = normSha(Buffer.from(cur)); writeJson(sf, base); }
+  }
   fs.writeFileSync(p + '.tmp', next); fs.renameSync(p + '.tmp', p);
   log(`Config editat: ${rel}${changes ? ` (${changes.map(c => `${c.key} = ${c.value}`).join(', ').slice(0, 300)})` : ''}`, 'done');
   const s = srv();
@@ -966,6 +1046,9 @@ async function saveConfig({ rel, changes, text, expect }) {
   await twoWay('config editat');
   const tw = watch.twoWay || {};
   if (tw.error) return { ok: true, pushed: false, error: tw.error, hash: sha1(next) };
+  // never report "sent" for something the sync replaced
+  let now = null; try { now = fs.readFileSync(p, 'utf8'); } catch { }
+  if (now !== next) return { ok: false, error: 'Sincronizarea a adus între timp altă versiune a fișierului de pe server - l-am reîncărcat, fă modificarea din nou.' };
   return { ok: true, pushed: true, canRestart: !!transport()?.canRestart, hash: sha1(next) };
 }
 async function twoWay(reason) {
@@ -986,9 +1069,14 @@ async function twoWay(reason) {
             await tr.remove(tr.pluginsDir, [e]);
             log(`Pe server era și ${e} (pus de mână) - îl înlocuiesc cu ${full} din profil`);
           } else if (catalogIndex.get(full)) {
-            await installThunderstore({ key: full, full, ver: ver || catalogIndex.get(full).ver, role: 'user', title: catalogIndex.get(full).name }, new Set());
+            try {
+              await installThunderstore({ key: full, full, ver: ver || catalogIndex.get(full).ver, role: 'user', title: catalogIndex.get(full).name }, new Set());
+              log(`Adus de pe server: ${full} ${ver || ''} (din Thunderstore)`, 'done');
+            } catch (err) {
+              if (err.code !== 'DUPLICATE') throw err;
+              log(`Pe server era și ${e}, dar profilul are deja același mod (${err.twin}) - îl scot de pe server`);
+            }
             await tr.remove(tr.pluginsDir, [e]);
-            log(`Adus de pe server: ${full} ${ver || ''} (din Thunderstore)`, 'done');
           } else {
             const tmp = path.join(DATA, 'cache', 'tmp', `srv-${Date.now()}`);
             for (const f of await tr.pull(tr.pluginsDir, e)) { const p = path.join(tmp, ...f.name.split('/')); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, f.data); }
@@ -1357,7 +1445,7 @@ async function checkAppUpdate() {
 // =====================================================================================================
 // IPC
 // =====================================================================================================
-ipcMain.handle('init', () => { const t = Date.now(); const r = initPayload(); perf(`init built in ${Date.now() - t}ms, ${Math.round(JSON.stringify(r).length / 1024)} KB`); return r; });
+ipcMain.handle('init', () => { const t = Date.now(); const r = initPayload(); setImmediate(pageReady); perf(`init built in ${Date.now() - t}ms, ${Math.round(JSON.stringify(r).length / 1024)} KB`); return r; });
 const initPayload = () => ({
   settings: publicSettings(), profile: modsPayload(), status, job, watch, installing, catalogFetched: catalog?.fetched || null,
   log: logTail.slice(-400), updates, modpack: modpackInfo(), list: listState, player: playerInfo(), appUpdate, version: OWN_VERSION, game: gameState,
@@ -1428,7 +1516,11 @@ async function action(name, arg) {
     case 'saveConfig': try { return await saveConfig(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
     case 'restartIdle': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, what: 'configurări noi' }); } catch (e) { return { ok: false, error: e.message }; }
     case 'restart': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, force: true }); } catch (e) { return { ok: false, error: e.message }; }
-    case 'fixcode': try { await transport().restartGame(); setTimeout(pollStatus, 20000); setTimeout(pollStatus, 60000); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
+    case 'fixcode': try {
+      const tr = transport();
+      if (typeof tr?.restartGame !== 'function') return { ok: false, error: 'Un join code nou se cere doar la serverele Docker (valheim-server); aici repornește serverul din panoul hostului.' };
+      await tr.restartGame(); setTimeout(pollStatus, 20000); setTimeout(pollStatus, 60000); return { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
     case 'startServer': try { await transport().ssh(`cd ~ && docker start ${s.conn.container}`); setTimeout(pollStatus, 5000); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
     case 'setSide': return setSide(arg.name, arg.side);
     case 'refresh': pollStatus(); send('mods', modsPayload()); return { ok: true };
@@ -1455,7 +1547,7 @@ async function action(name, arg) {
     case 'checkUpdates': await checkUpdates(10 * 60e3); return { ok: true };
     case 'catalog':
       if (!catalog) await refreshCatalog(); else if (Date.now() - catalog.fetched > 6 * 3600e3) refreshCatalog();
-      return { ok: !!catalog, fetched: catalog?.fetched || null, packages: catalog?.packages || [] };
+      return { ok: !!catalog, fetched: catalog?.fetched || null, packages: catalog?.packages?.length ? catalog.packages : null };
     case 'refreshCatalog': { const ok = await refreshCatalog(); return { ok, fetched: catalog?.fetched || null, packages: ok ? catalog.packages : null }; }
     case 'install': return installPackage(arg.full, arg.ver);
     case 'remove': return removePackage(arg);
@@ -1496,7 +1588,9 @@ async function action(name, arg) {
       catch (e) { return { ok: false, error: e.message }; }
     }
     case 'setSetting': {
-      if (GLOBAL_SETTABLE.includes(arg.key)) { G[arg.key] = arg.value; saveSettings(); if (arg.key === 'startWithWindows') applyStartup(); }
+      if (GLOBAL_SETTABLE.includes(arg.key)) { G[arg.key] = arg.value; saveSettings(); if (arg.key === 'startWithWindows') applyStartup();
+        if (arg.key === 'lang') trayMenu();
+        if (arg.key === 'gameDir') { Profile.findGame().then(g => { game = g; if (Profile.isGameDir(G.gameDir)) game.game = G.gameDir; send('player', playerInfo()); }); } }
       else if (SERVER_SETTABLE[arg.key] && s) {
         s[SERVER_SETTABLE[arg.key]] = arg.value; saveSettings();
         if (arg.key === 'autoSync') { if (arg.value && watch.dirty) changedAt = Date.now() - s.quietSeconds * 1000; setWatch(arg.value ? 'idle' : 'off', arg.value ? 'pornit' : 'auto-sync oprit'); }
@@ -1514,6 +1608,14 @@ async function action(name, arg) {
     case 'quit': quitting = true; app.quit(); return { ok: true };
     // ----- player -----
     case 'play': return playerSync({ launch: true });
+    case 'cacheInfo': return { ok: true, ...cacheStats() };
+    case 'clearCache': {
+      if (job) return { ok: false, error: 'Lucrez deja - încearcă în câteva secunde.' };
+      const before = cacheStats().bytes;
+      for (const d of CACHE_DIRS) { try { fs.rmSync(path.join(DATA, 'cache', d), { recursive: true, force: true }); } catch { } }
+      log(`Cache-ul descărcărilor golit (${Math.round(before / 1048576)} MB)`);
+      return { ok: true, freed: before };
+    }
     case 'setJoinPassword': {
       if (!s) return { ok: false };
       s.joinPassEnc = arg ? enc(String(arg)) : null; saveSettings(); send('settings', publicSettings());
@@ -1536,7 +1638,7 @@ async function action(name, arg) {
       if (s) for (const p of Object.values(getProfile().packages)) if (p.source === 'nexus') out[p.modId] = p.ver;
       return { ok: true, installed: out, pending: nexusPending };
     }
-    case 'findGame': game = await Profile.findGame(); send('player', playerInfo()); return { ok: !!game.game, game };
+    case 'findGame': game = await Profile.findGame(); if (Profile.isGameDir(G.gameDir)) game.game = G.gameDir; send('player', playerInfo()); return { ok: !!game.game, game };
     case 'restoreLoader': {
       if (!game.game) return { ok: false, error: 'Nu găsesc folderul jocului.' };
       const ok = Profile.restoreGame(game.game);
@@ -1576,6 +1678,7 @@ app.whenReady().then(async () => {
   if (!dataArg) { applyStartup(); registerProtocols(); }
   createTray();
   if (!process.argv.includes('--hidden') || process.argv.some(x => x.startsWith('--shot='))) createWindow(true);
+  for (const n of settingsNotes) { log(n, 'error'); toast(n, 'error'); }
   log(`Bifrost ${OWN_VERSION} pornit (${G.servers.length} servere${srv() ? `, activ: ${srv().name} - ${srv().role === 'admin' ? 'admin' : 'jucător'}` : ''})`);
   loadManifestCache();
   indexCatalog();
@@ -1583,10 +1686,13 @@ app.whenReady().then(async () => {
   setInterval(() => checkUpdates(6 * 3600e3), 3600e3);
   setTimeout(checkAppUpdate, 15000); setInterval(checkAppUpdate, 4 * 3600e3);
   game = await Profile.findGame();
-  if (G.gameDir) game.game = G.gameDir;
+  if (Profile.isGameDir(G.gameDir)) game.game = G.gameDir;
+  send('player', playerInfo());
   // admin: watch the profile, sync, configs; everyone: status + the list
   setTimeout(() => { if (isAdmin() && srv().conn && srv().autoSync) syncNow('pornire'); }, 4000);
   setInterval(tick, 3000);
+  setTimeout(() => { if (!job) pruneCache(); }, 90e3);
+  setInterval(() => { if (!job) pruneCache(); }, 24 * 3600e3);
   const gameCheck = () => setTimeout(async () => { await checkGameProcess(); gameCheck(); }, (win && !win.isDestroyed() && win.isVisible()) || gameState.launching ? 4000 : 20000);
   checkGameProcess(); gameCheck();
   setInterval(() => twoWay('verificare periodică'), 3 * 60e3);
