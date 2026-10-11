@@ -39,6 +39,7 @@ const { makeTransport, walk, normSha } = require('./lib/transport');
 const { syncMods } = require('./lib/modsync');
 const { syncConfigs, SKIP: CFG_SKIP, safeRel } = require('./lib/serversync');
 const bepcfg = require('./lib/bepcfg');
+const sharedcfg = require('./lib/sharedcfg');
 const serverenv = require('./lib/serverenv');
 const { metadata: dllMetadata } = require('./lib/dllmeta');
 const a2s = require('./lib/a2s');
@@ -85,6 +86,7 @@ const SERVER_DEFAULTS = {
   conn: null, connSecretEnc: null, world: '', addresses: '', builtin: 'BepInExPack',
   autoSync: true, quietSeconds: 8, retryMinutes: 5, syncConfigs: true, syncAllMods: true, pullServerMods: true,
   autoPublish: true, publishAddress: false, publishPassword: false, modpackTeam: '', modpackName: '', tsTokenEnc: null, nexusLinks: {},
+  sharedConfigs: [],   // config files whose non-default settings players get too (lib/sharedcfg.js)
   // player
   recommended: {}, nexusChosen: {},
   // PLAY joins the server straight away (Valheim's +connect / -password); address empty = from the list / server logs
@@ -738,6 +740,31 @@ async function launchGame() {
   const until = Date.now() + 120e3;
   (async () => { while (gameState.launching && Date.now() < until) { await new Promise(r => setTimeout(r, 2000)); await checkGameProcess(); } if (gameState.launching) { gameState.launching = false; sendGame(); } })();
 }
+// the settings the admin shares (manifest.configs) written into this player's config files - only while the game is
+// not running (it saves its settings over the files when it closes). A file the mod has not written yet (never started
+// on this PC) gets them from the next PLAY on.
+function applySharedConfigs() {
+  const s = srv(), f = path.join(serverDir(s.id), 'shared-applied.json'), prev = readJson(f, {});
+  const list = Array.isArray(manifest?.configs) ? manifest.configs : [];
+  if (!list.length && !Object.keys(prev).length) return;
+  const out = {}, done = [];
+  const one = (rel, shared) => {
+    let p; try { p = cfgPath(rel); } catch { return; }
+    if (!fs.existsSync(p)) { if (shared.values?.length) log(`  ${rel}: the mod has not written its config on this PC yet - the server's settings apply from the next PLAY`, 'out'); return; }
+    const r = sharedcfg.applyShared(fs.readFileSync(p, 'utf8'), shared, prev[rel] || {});
+    if (r.guidMismatch) { log(`  ${rel}: belongs to another mod here - the server's settings were not applied`, 'out'); return; }
+    if (r.changed) { fs.writeFileSync(p + '.tmp', r.text); fs.renameSync(p + '.tmp', p); done.push(rel); }
+    if (r.skipped.length) log(`  ${rel}: not in this version of the mod: ${r.skipped.join(', ')}`, 'out');
+    if (Object.keys(r.applied).length) out[rel] = r.applied;
+  };
+  try {
+    for (const c of list) if (c && typeof c.rel === 'string' && Array.isArray(c.values)) one(c.rel, c);
+    // files the admin stopped sharing: what Bifrost put there goes back to the defaults
+    for (const rel of Object.keys(prev)) if (!list.some(c => c?.rel === rel)) one(rel, { values: [] });
+  } catch (e) { log(`server settings: ${e.message}`, 'error'); }
+  writeJson(f, out);
+  if (done.length) log(`  the server's settings applied: ${done.join(', ')}`, 'out');
+}
 async function playerSync({ launch } = {}) {
   if (!srv()) return { ok: false, error: 'Add or create a server first.' };
   if (job) return { ok: false, error: 'Lucrez deja.' };
@@ -776,6 +803,7 @@ async function playerSync({ launch } = {}) {
       if (missing.length) throw new Error(`Still needed from Nexus: ${missing.map(n => n.title).join(', ')} - press "Slow download" on the page that opened.`);
       toast('Pe pagina Nexus care s-a deschis apasă „Slow download” - Bifrost îl instalează singur.', 'info');
     }
+    if (!await checkGameProcess()) applySharedConfigs();
     log(`■ Mods are up to date (${Object.keys(pr.packages).length} packages)`, 'done');
     if (launch) await launchGame();
     return { ok: true };
@@ -1229,6 +1257,7 @@ async function saveConfig({ rel, changes, text, expect }) {
   fs.writeFileSync(p + '.tmp', next); fs.renameSync(p + '.tmp', p);
   log(`Config edited: ${rel}${changes ? ` (${changes.map(c => `${c.key} = ${c.value}`).join(', ').slice(0, 300)})` : ''}`, 'done');
   const s = srv();
+  if (isAdmin() && (s.sharedConfigs || []).includes(rel)) schedulePublish('shared settings');
   if (!isAdmin() || !s.conn || !s.syncConfigs) return { ok: true, pushed: false, local: true, hash: sha1(next) };
   { const pd = readPending(); pd[rel] = { sha: normSha(Buffer.from(next)), at: Date.now() }; writePending(pd); }
   // straight to the server (the config sync sees the local change); a job in progress -> it goes right after
@@ -1319,6 +1348,7 @@ function buildList() {
     server: { name: s.name, world: s.world, joinCode: status.codeBroken ? null : status.joinCode || null, joinCodeAt: status.joinCodeAt || null, address: s.publishAddress ? status.publicIp || null : null,
       // opt-in: everyone with the invite link can read it (the list is the same link that gives them the IP)
       ...(s.publishPassword && dec(s.joinPassEnc) ? { password: dec(s.joinPassEnc) } : {}) },
+    configs: (s.sharedConfigs || []).map(rel => { try { return sharedcfg.collect(rel, fs.readFileSync(cfgPath(rel), 'utf8')); } catch { return null; } }).filter(Boolean),
   });
 }
 let ghCliToken = undefined;
@@ -1714,6 +1744,16 @@ async function action(name, arg) {
         return { rel, size, kind: /\.cfg$/i.test(rel) ? 'cfg' : 'text' };
       });
       return { ok: true, files, server: isAdmin() && !!srv().conn && !!srv().syncConfigs, side: readState().mods[arg] || null };
+    }
+    case 'shareConfig': {   // { rel, on }: players get this file's non-default settings too
+      if (!isAdmin() || !s) return { ok: false };
+      try { cfgPath(arg.rel); } catch (e) { return { ok: false, error: e.message }; }
+      const set = new Set(s.sharedConfigs || []);
+      if (arg.on) set.add(arg.rel); else set.delete(arg.rel);
+      s.sharedConfigs = [...set]; saveSettings(); send('settings', publicSettings());
+      log(`${arg.on ? 'Players now get' : 'Players no longer get'} the settings of ${arg.rel}`, 'done');
+      schedulePublish('shared settings');
+      return { ok: true, shared: s.sharedConfigs };
     }
     case 'readConfig': try {
       const p = cfgPath(arg);

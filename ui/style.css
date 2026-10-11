@@ -401,6 +401,9 @@ body:not(.no-server) [data-need="none"] { display: none !important; }
 .cfg-bar { position: sticky; bottom: -40px; z-index: 3; margin: 18px -28px -40px; padding: 14px 28px; background: var(--bg2); border-top: 1px solid var(--line2); display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 13px; }
 .cfg-bar.done { color: var(--green); }
 .cfg-bar.done .btn { flex: none; }
+.cfg-share { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 10px; cursor: pointer; }
+.cfg-share b { display: block; font-size: 13.5px; }
+.cfg-share small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; line-height: 1.4; }
 .cfg-orphan { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--line2); border-radius: 10px; }
 .tag.on { border-color: #5fd09a66; color: var(--green); }
 .tag.on::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 6px; vertical-align: 1px; }

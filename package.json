@@ -1,7 +1,7 @@
 {
   "name": "bifrost",
   "productName": "Bifrost",
-  "version": "1.9.6",
+  "version": "1.9.7",
   "description": "Valheim mod manager and server companion",
   "main": "main.js",
   "private": true,

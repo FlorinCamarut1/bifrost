@@ -747,6 +747,7 @@ function renderConfig() {
   $('#drawer-body').innerHTML = `
     <div class="cfg-head"><h2>${esc(CFG.title)}</h2><div class="muted">${f?.parsed?.plugin ? `<span class="no-i18n">${esc(f.parsed.plugin)}</span> · ` : ''}<span>${dest}</span></div></div>
     ${files}
+    ${S.settings?.isAdmin && CFG.rel && /\.cfg$/i.test(CFG.rel) && !CFG.err ? `<label class="cfg-share"><div><b>${L('Și prietenii primesc setările din fișierul ăsta', 'Players get the settings of this file too')}</b><small>${L('Ce ai schimbat față de valorile implicite ajunge și în configul lor, la JOACĂ. Pentru setările pe care serverul nu le trimite (de ex. timpul de îmblânzire: îl calculează jocul jucătorului de lângă animal).', 'What you changed from the defaults reaches their config too, on PLAY. For settings the server does not send (e.g. taming time: the game of the player next to the animal works it out).')}</small></div><span class="switch"><input type="checkbox" id="cfg-share" ${(S.settings.server?.sharedConfigs || []).includes(CFG.rel) ? 'checked' : ''}><span></span></span></label>` : ''}
     ${CFG.key === '' && CFG.rel ? `<div class="cfg-orphan"><span class="muted small">${L('Niciun mod instalat nu folosește fișierul ăsta (rămas de la un mod dezinstalat?).', 'No installed mod uses this file (left from an uninstalled mod?).')}</span><button class="btn small danger" id="cfg-delete">${L('Șterge fișierul', 'Delete the file')}</button></div>` : ''}
     <div class="cfg-tools">${f?.parsed && !CFG.raw ? `<input class="txt" id="cfg-q" placeholder="Caută o setare..." value="${esc(CFG.q)}">` : `<span class="muted small no-i18n">${esc(CFG.rel || '')}</span>`}
       ${f?.parsed ? `<div class="seg" id="cfg-mode"><button class="${CFG.raw ? '' : 'on server'}" data-mode="form">Setări</button><button class="${CFG.raw ? 'on server' : ''}" data-mode="raw">Text</button></div>` : ''}</div>
@@ -815,7 +816,14 @@ function cfgSet(id, v) {
   $(`#cfg-body [data-row="${id}"]`)?.classList.toggle('changed', CFG.changes.has(id));
   renderConfigBar();
 }
-$('#drawer-body').addEventListener('change', e => {
+$('#drawer-body').addEventListener('change', async e => {
+  if (e.target.id === 'cfg-share' && String(S.drawer).startsWith('cfg:')) {
+    const on = e.target.checked, r = await window.vp.act('shareConfig', { rel: CFG.rel, on });
+    if (!r.ok) { e.target.checked = !on; toast(r.error || L('Nu s-a putut.', 'Could not change it.'), 'error'); return; }
+    if (S.settings.server) S.settings.server.sharedConfigs = r.shared;
+    toast(on ? L('Prietenii primesc setările la următorul JOACĂ (după ce se publică lista).', 'Players get the settings on their next PLAY (once the list is published).') : L('Prietenii nu mai primesc setările din fișierul ăsta; ce le-a pus Bifrost revine la implicit.', 'Players no longer get this file\'s settings; what Bifrost put there goes back to the defaults.'), 'ok');
+    return;
+  }
   if (e.target.id !== 'cfg-file' || !String(S.drawer).startsWith('cfg:')) return;
   const rel = e.target.value; e.target.value = CFG.rel; CFG.after = null; loadConfigFile(rel);
 });
