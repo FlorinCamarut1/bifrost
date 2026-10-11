@@ -230,6 +230,8 @@
     "Ia de pe server": "Get it from the server",
     "Șterge": "Delete",
     "Lista e un link pe care îl dai prietenilor. Cu IP, Bifrost-ul lor îi bagă direct pe server la JOACĂ; fără IP intră cu join code-ul.": "The list is a link you give your friends. With the IP their Bifrost puts them straight on the server on PLAY; without it they join with the join code.",
+    "Pune și parola în listă": "Put the password in the list too",
+    "Prietenii nu mai scriu parola: Bifrost-ul lor o trimite singur la JOACĂ. Oricine are linkul de invitație o poate citi.": "Friends no longer type the password: their Bifrost sends it on PLAY. Anyone with the invite link can read it.",
     "JOACĂ te bagă direct pe server: alegi caracterul și apeși": "PLAY puts you straight on the server: pick the character and press",
     "Oprit: intri din joc, cu join code-ul.": "Off: you join from the game, with the join code.",
     "Încă nu știu IP-ul public al serverului (apare după ce pornește) - sau scrie adresa mai jos.": "The server's public IP is not known yet (it shows up once it has started) - or type the address below.",

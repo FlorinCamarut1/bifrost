@@ -1,3 +1,6 @@
-﻿## Bifrost 1.9.5
+﻿## Bifrost 1.9.6
 
-- Config edits now survive a server restart. Many mods save their settings when the game closes, so stopping the server wrote the old values over the file Bifrost had just sent, the game started with them again, and the sync then brought them back into your profile (e.g. OdinHorse "Time to Tame" and "Food items" kept resetting). A restart now stops the game first, sends the configs you edited again while it is down, then starts it. Until the game has loaded them, the sync never pulls the server's copy over an edited config; if the server rewrites one anyway (a restart done outside Bifrost), it is sent again and the server restarts once nobody is playing.
+- New admin setting **Put the password in the list too** (off by default): friends' Bifrost sends the server password on PLAY, so they never type it. Anyone with the invite link can read it, the same as the IP. A password a player saved himself still wins.
+- Friends only join directly when the list has the server's address: turn on **Put the IP in the list too** (also off by default).
+- Settings showed "The server's public IP is not known yet" on the admin's PC even though PLAY knew it: the line now refreshes when the server status arrives.
+- Config edits survive a server restart (1.9.5).

@@ -306,7 +306,9 @@ function renderSettings() {
           : 'Lista serverului nu are IP-ul: scrie adresa mai jos (o ai de la admin) sau adminul bifează „Pune și IP-ul în listă”.';
     // (attributes set from code are not seen by the translator)
     $('#dj-addr').placeholder = s.joinAddress ? '' : (s.joinTarget || ((s.lang || 'en') === 'en' ? window.bifrostI18n.t('automat') : 'automat'));
-    $('#jp-state').innerHTML = s.hasJoinPass ? `<span style="color:var(--green)">${L('✓ Parolă salvată (criptat, doar pe PC-ul tău).', '✓ Password saved (encrypted, only on your PC).')}</span>` : `<span class="muted">${L('Nicio parolă salvată. Dacă serverul are parolă, scrie-o o dată aici.', 'No password saved. If the server has one, type it here once.')}</span>`;
+    $('#jp-state').innerHTML = s.hasJoinPass ? `<span style="color:var(--green)">${L('✓ Parolă salvată (criptat, doar pe PC-ul tău).', '✓ Password saved (encrypted, only on your PC).')}</span>`
+      : s.listPassword ? `<span style="color:var(--green)">${L('✓ Parola vine din lista serverului - nu trebuie să scrii nimic.', '✓ The password comes from the server\'s list - nothing to type.')}</span>`
+      : `<span class="muted">${L('Nicio parolă salvată. Dacă serverul are parolă, scrie-o o dată aici.', 'No password saved. If the server has one, type it here once.')}</span>`;
     $('#btn-jp-clear').hidden = !s.hasJoinPass;
   }
   // restart / new join code only where Bifrost can do them

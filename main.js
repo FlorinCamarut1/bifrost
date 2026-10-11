@@ -84,7 +84,7 @@ const SERVER_DEFAULTS = {
   // admin
   conn: null, connSecretEnc: null, world: '', addresses: '', builtin: 'BepInExPack',
   autoSync: true, quietSeconds: 8, retryMinutes: 5, syncConfigs: true, syncAllMods: true, pullServerMods: true,
-  autoPublish: true, publishAddress: false, modpackTeam: '', modpackName: '', tsTokenEnc: null, nexusLinks: {},
+  autoPublish: true, publishAddress: false, publishPassword: false, modpackTeam: '', modpackName: '', tsTokenEnc: null, nexusLinks: {},
   // player
   recommended: {}, nexusChosen: {},
   // PLAY joins the server straight away (Valheim's +connect / -password); address empty = from the list / server logs
@@ -173,7 +173,8 @@ const publicSettings = () => {
     // flat aliases the UI reads
     ...(s ? { role: s.role, serverName: s.name, serverWorld: s.world, addresses: s.addresses, autoSync: s.autoSync, quietSeconds: s.quietSeconds,
       retryMinutes: s.retryMinutes, syncConfigs: s.syncConfigs, syncAllMods: s.syncAllMods, pullServerMods: s.pullServerMods,
-      autoPublish: s.autoPublish, publishAddress: s.publishAddress, hasToken: !!s.tsTokenEnc,
+      autoPublish: s.autoPublish, publishAddress: s.publishAddress, publishPassword: !!s.publishPassword, hasToken: !!s.tsTokenEnc,
+      listPassword: s.role === 'player' && !!manifest?.server?.password,
       canRestart: !!(s.conn && (s.conn.type === 'ssh-docker' || s.conn.restartCmd)), dockerServer: s.conn?.type === 'ssh-docker',
       directJoin: s.directJoin !== false, joinAddress: s.joinAddress || '', hasJoinPass: !!s.joinPassEnc, joinTarget: joinTarget() } : {}),
   };
@@ -631,7 +632,8 @@ async function refreshManifest() {
     manifest = await listhost.fetchList(fetchN, s.list);
     writeJson(listCache(), manifest);
     manifestErr = null;
-    if (s.role === 'player' && manifest.server?.name && manifest.server.name !== s.name) { s.name = manifest.server.name; saveSettings(); send('settings', publicSettings()); }
+    if (s.role === 'player' && manifest.server?.name && manifest.server.name !== s.name) { s.name = manifest.server.name; saveSettings(); }
+    if (s.role === 'player') { send('settings', publicSettings()); pollStatus(); }   // address / password from the list
   } catch (e) { manifestErr = e.message; }
   manifestAt = Date.now();
   send('player', playerInfo());
@@ -708,7 +710,8 @@ async function joinArgs() {
   const target = joinTarget(s);
   if (!target) return { args: [], target: null };
   if (!s.joinPassEnc && isAdmin() && transport()?.docker) { try { await detectJoinPassword(s); } catch (e) { log(`server password: ${e.message}`, 'error'); } }
-  const pw = dec(s.joinPassEnc);
+  // a player's own saved password wins; else the one the admin put in the server's list
+  const pw = dec(s.joinPassEnc) || (s.role === 'player' ? String(manifest?.server?.password || '') || null : null);
   return { args: ['+connect', target, ...(pw ? ['-password', pw] : [])], target, password: !!pw };
 }
 async function launchGame() {
@@ -1002,6 +1005,7 @@ async function steamPlayers() {
   const i = await a2s.info(a.host, a.queryPort);
   return i.players;
 }
+let lastJoinTarget;
 async function pollStatus() {
   const s = srv();
   if (!s || polling) return;
@@ -1027,6 +1031,9 @@ async function pollStatus() {
   } catch (e) { status = { reachable: false, error: e.message, checkedAt: Date.now() }; }
   polling = false;
   send('status', status); updateTray();
+  // the Settings line "Now: <address>" is computed from the status: refresh it when the address appears or changes
+  const jt = joinTarget(s);
+  if (jt !== lastJoinTarget) { lastJoinTarget = jt; send('settings', publicSettings()); }
   if (s.role === 'admin' && status.joinCode && prevCode !== undefined && status.joinCode !== prevCode && !status.codeBroken) schedulePublish('new join code');
 }
 
@@ -1309,7 +1316,9 @@ function buildList() {
   const s = srv();
   return buildServerList({
     mods: adminMods().mods, nexusLinks: s.nexusLinks,
-    server: { name: s.name, world: s.world, joinCode: status.codeBroken ? null : status.joinCode || null, joinCodeAt: status.joinCodeAt || null, address: s.publishAddress ? status.publicIp || null : null },
+    server: { name: s.name, world: s.world, joinCode: status.codeBroken ? null : status.joinCode || null, joinCodeAt: status.joinCodeAt || null, address: s.publishAddress ? status.publicIp || null : null,
+      // opt-in: everyone with the invite link can read it (the list is the same link that gives them the IP)
+      ...(s.publishPassword && dec(s.joinPassEnc) ? { password: dec(s.joinPassEnc) } : {}) },
   });
 }
 let ghCliToken = undefined;
@@ -1658,7 +1667,7 @@ ipcMain.handle('action', async (_e, name, arg) => {
 // (an AppImage's own path is gone once it quits - relaunch the .AppImage file)
 ipcMain.handle('installUpdate', () => { quitting = true; app.relaunch(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE, args: process.argv.slice(1) } : undefined); app.quit(); });
 const SERVER_SETTABLE = { directJoin: 'directJoin', joinAddress: 'joinAddress', serverName: 'name', serverWorld: 'world', addresses: 'addresses', autoSync: 'autoSync', quietSeconds: 'quietSeconds', retryMinutes: 'retryMinutes',
-  syncConfigs: 'syncConfigs', syncAllMods: 'syncAllMods', pullServerMods: 'pullServerMods', autoPublish: 'autoPublish', publishAddress: 'publishAddress', builtin: 'builtin', modpackTeam: 'modpackTeam', modpackName: 'modpackName' };
+  syncConfigs: 'syncConfigs', syncAllMods: 'syncAllMods', pullServerMods: 'pullServerMods', autoPublish: 'autoPublish', publishAddress: 'publishAddress', publishPassword: 'publishPassword', builtin: 'builtin', modpackTeam: 'modpackTeam', modpackName: 'modpackName' };
 const GLOBAL_SETTABLE = ['startWithWindows', 'notifications', 'gameDir', 'lang', 'bepConsoleMode'];
 async function action(name, arg) {
   const s = srv();
@@ -1800,7 +1809,8 @@ async function action(name, arg) {
       else if (SERVER_SETTABLE[arg.key] && s) {
         s[SERVER_SETTABLE[arg.key]] = arg.value; saveSettings();
         if (arg.key === 'autoSync') { if (arg.value && watch.dirty) changedAt = Date.now() - s.quietSeconds * 1000; setWatch(arg.value ? 'idle' : 'off', arg.value ? 'pornit' : 'auto-sync oprit'); }
-        if (arg.key === 'publishAddress' || arg.key === 'serverName' || arg.key === 'serverWorld') schedulePublish('settings');
+        if (arg.key === 'publishPassword' && arg.value && !s.joinPassEnc && transport()?.docker) await detectJoinPassword(s).catch(e => log(`server password: ${e.message}`, 'error'));
+        if (arg.key === 'publishAddress' || arg.key === 'publishPassword' || arg.key === 'serverName' || arg.key === 'serverWorld') schedulePublish('settings');
       } else return { ok: false };
       send('settings', publicSettings()); return { ok: true };
     }
