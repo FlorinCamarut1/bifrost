@@ -419,7 +419,37 @@ function readState() { const j = srv() ? readJson(statePath(), {}) : {}; return 
 const writeState = st => writeJson(statePath(), st);
 
 let job = null;
-function setJob(j) { job = j; send('job', job); }
+function setJob(j) { job = j; send('job', job); if (!j) setImmediate(pump); }
+
+// ---------- the queue: installs / removals / updates clicked while Bifrost is busy wait their turn ----------
+// (the auto-sync waits for the queue to empty, so many changes go to the server in one sync and one restart)
+const queue = [];
+let pumping = false;
+const queueInfo = () => queue.map(q => ({ label: q.label, key: q.key || null }));
+function enqueue(label, key, run) {
+  if (key && queue.some(q => q.key === key)) return Promise.resolve({ ok: true, queued: true, already: true });
+  return new Promise(resolve => {
+    queue.push({ label, key, run, resolve });
+    if (key) { installing[key] = { queued: true, at: Date.now() }; send('installing', installing); }
+    log(`  queued: ${label} (${queue.length} waiting)`, 'out');
+    send('queue', queueInfo());
+    pump();
+  });
+}
+async function pump() {
+  if (pumping) return;
+  pumping = true;
+  try {
+    while (queue.length && !job) {
+      const q = queue.shift();
+      send('queue', queueInfo());
+      if (q.key && installing[q.key]?.queued) { delete installing[q.key]; send('installing', installing); }
+      let r;
+      try { r = await q.run(); } catch (e) { r = { ok: false, error: e.message }; }
+      q.resolve(r);
+    }
+  } finally { pumping = false; send('queue', queueInfo()); }
+}
 let progress = null;
 function setProgress(p) { progress = p; send('progress', progress); }
 
@@ -524,7 +554,11 @@ function hintSide(name, side) {
 // a mod picked in Descoperă (players: their own extra; admins: goes to the server too)
 async function installPackage(full, ver) {
   if (!srv()) return { ok: false, error: 'Adaugă sau creează întâi un server.' };
-  if (job) return { ok: false, error: 'Lucrez deja - încearcă în câteva secunde.' };
+  if (job || queue.length || pumping) return enqueue(`Install ${full}`, full, () => installPackageNow(full, ver));
+  return installPackageNow(full, ver);
+}
+async function installPackageNow(full, ver) {
+  if (!srv()) return { ok: false, error: 'Adaugă sau creează întâi un server.' };
   const p = catalogIndex.get(full);
   ver = ver || p?.ver;
   if (!ver) return { ok: false, error: 'Nu găsesc pachetul în catalog.' };
@@ -541,7 +575,10 @@ async function installPackage(full, ver) {
   finally { delete installing[full]; send('installing', installing); setProgress(null); setJob(null); afterProfileChange(); }
 }
 function removePackage(key) {
-  if (job) return { ok: false, error: 'Lucrez deja.' };
+  if (job || queue.length || pumping) return enqueue(`Remove ${key}`, null, async () => removePackageNow(key));
+  return removePackageNow(key);
+}
+function removePackageNow(key) {
   const pr = getProfile(), p = pr.packages[key];
   if (!p) return { ok: false, error: 'Nu e instalat.' };
   if (p.role === 'required') return { ok: false, error: 'Serverul are nevoie de el.' };
@@ -556,7 +593,10 @@ function removePackage(key) {
   return { ok: true };
 }
 async function updateAll() {
-  if (job) return { ok: false, error: 'Lucrez deja.' };
+  if (job || queue.length || pumping) return enqueue('Update all mods', null, () => updateAllNow());
+  return updateAllNow();
+}
+async function updateAllNow() {
   const pr = getProfile();
   const todo = Object.entries(pr.packages).filter(([k, x]) => x.source === 'thunderstore' && x.role !== 'required' && catalogIndex.get(k) && cmpVer(catalogIndex.get(k).ver, x.ver) > 0);
   if (!todo.length) return { ok: true, count: 0 };
@@ -800,6 +840,11 @@ async function syncNow(reason) {
   const s = srv();
   if (!isAdmin() || !s.conn) return;
   if (job) { toast('Rulează deja ceva - aștept să termine.'); return; }
+  if (restarting) {
+    syncAfterRestart = reason;
+    if (reason === 'manual') toast('Serverul repornește acum - sincronizez imediat după.', 'info');
+    return;
+  }
   const manual = reason === 'manual', tr = transport();
   const sig = signature();
   changedAt = null; watch.retryAt = null;
@@ -838,6 +883,7 @@ async function syncNow(reason) {
 
 // restart only while nobody plays; afterwards configs + list
 async function maybeRestart({ manual, what = '', force } = {}) {
+  if (restarting) return { ok: true, already: true };
   const s = srv(), tr = transport(), st = readState();
   if (!st.restartPending && !force) {
     watch.lastResult = { kind: 'ok', text: 'Serverul e la zi', what };
@@ -866,20 +912,30 @@ async function maybeRestart({ manual, what = '', force } = {}) {
       return { ok: true, postponed: true };
     }
   }
-  const r = await restartServer();
+  const r = await restartServer({ fast: !force });
   watch.lastResult = { kind: 'ok', text: r.joinCode ? `Server repornit - join code ${r.joinCode}` : 'Server repornit', what };
   notify('Serverul Valheim e actualizat', `${what}\nRepornit${r.joinCode ? ` - join code ${r.joinCode}` : ''}`.trim());
   setWatch('idle', 'la zi');
   pollStatus(); schedulePublish('restart'); setTimeout(() => twoWay('after restart'), 1500);
   return { ok: true, joinCode: r.joinCode };
 }
-async function restartServer() {
+// the server restart (2-3 minutes until a join code) runs in the background: mods can be installed meanwhile, and a
+// sync asked for during it runs right after
+let restarting = false, syncAfterRestart = null;
+async function restartServer({ fast } = {}) {
   const tr = transport();
-  setJob({ kind: 'restart', label: 'Restart server', started: Date.now() });
+  restarting = true; watch.restarting = Date.now(); setWatch('restarting', 'repornesc serverul...');
   log(`▶ Restart server (${tr.label()})`, 'start');
   try {
     let since = Math.floor(Date.now() / 1000);
-    await tr.restart();
+    // after a mod sync: only the game is restarted (the container restart + Steam update check took minutes);
+    // anything unexpected -> the full container restart
+    let quick = false;
+    if (fast && tr.reloadModsAndRestartGame) {
+      try { quick = await tr.reloadModsAndRestartGame(); } catch (e) { log(`  quick restart not possible (${e.message}) - restarting the container`, 'out'); }
+      if (quick) log('  mods copied into the game, only the game process restarts', 'out');
+    }
+    if (!quick) await tr.restart();
     const st = readState(); st.restartPending = false; writeState(st);
     if (!tr.docker) { log('■ Server restarted', 'done'); return { ok: true }; }
     // the valheim-server image: wait for an active join code; its join-code check sometimes crashes
@@ -899,11 +955,14 @@ async function restartServer() {
       await tr.restartGame();
     }
     return { ok: true };
-  } finally { setJob(null); }
+  } finally {
+    restarting = false; watch.restarting = null; send('watch', watch);
+    if (syncAfterRestart) { const why = syncAfterRestart; syncAfterRestart = null; setTimeout(() => syncNow(why), 1500); }
+  }
 }
 
 function tick() {
-  if (!isAdmin() || !srv().conn || job) return;
+  if (!isAdmin() || !srv().conn || job || queue.length || pumping || restarting) return;
   const s = srv(), sig = signature();
   if (sig !== seenSig) {
     const first = seenSig === null;
@@ -1066,7 +1125,7 @@ async function saveConfig({ rel, changes, text, expect }) {
 }
 async function twoWay(reason) {
   const s = srv();
-  if (!isAdmin() || !s.conn || twoWayBusy || job || !(s.syncConfigs || s.pullServerMods)) return;
+  if (!isAdmin() || !s.conn || twoWayBusy || job || restarting || !(s.syncConfigs || s.pullServerMods)) return;
   twoWayBusy = true;
   const tr = transport(), pr = getProfile(), res = { at: Date.now(), push: 0, pull: 0, mods: [], error: null };
   try {
@@ -1403,7 +1462,7 @@ async function nexusInstall({ modId, fileId, title, version, fileName }) {
     fileId = f.fileId; version = version || f.version;
   }
   const e = { modId: +modId, fileId: +fileId, title, version, fileName };
-  if (G.nexusUser?.premium) { if (job) return { ok: false, error: 'Lucrez deja.' }; return nexusInstallNow(e); }
+  if (G.nexusUser?.premium) { if (job || queue.length || pumping) return enqueue(`Install ${e.title} (Nexus)`, `nexus-${e.modId}`, () => nexusInstallNow(e)); return nexusInstallNow(e); }
   nexusPending[e.modId] = { ...e, at: Date.now() };
   send('nexusPending', nexusPending);
   shell.openExternal(Nexus.filesPage(e.modId, e.fileId));
@@ -1468,7 +1527,7 @@ async function checkAppUpdate() {
 // =====================================================================================================
 ipcMain.handle('init', () => { const t = Date.now(); const r = initPayload(); setImmediate(pageReady); perf(`init built in ${Date.now() - t}ms, ${Math.round(JSON.stringify(r).length / 1024)} KB`); return r; });
 const initPayload = () => ({
-  settings: publicSettings(), profile: modsPayload(), status, job, watch, installing, catalogFetched: catalog?.fetched || null,
+  settings: publicSettings(), profile: modsPayload(), status, job, watch, installing, queue: queueInfo(), catalogFetched: catalog?.fetched || null,
   log: logTail.slice(-400), updates, modpack: modpackInfo(), list: listState, player: playerInfo(), appUpdate, version: OWN_VERSION, game: gameState,
 });
 ipcMain.handle('action', async (_e, name, arg) => {
@@ -1538,6 +1597,7 @@ async function action(name, arg) {
     case 'restartIdle': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, what: 'configurări noi' }); } catch (e) { return { ok: false, error: e.message }; }
     case 'restart': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, force: true }); } catch (e) { return { ok: false, error: e.message }; }
     case 'fixcode': try {
+      if (restarting) return { ok: false, error: 'Serverul repornește acum - așteaptă să termine.' };
       const tr = transport();
       if (typeof tr?.restartGame !== 'function') return { ok: false, error: 'Un join code nou se cere doar la serverele Docker (valheim-server); aici repornește serverul din panoul hostului.' };
       await tr.restartGame(); setTimeout(pollStatus, 20000); setTimeout(pollStatus, 60000); return { ok: true };

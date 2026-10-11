@@ -126,6 +126,16 @@
     'Nexus nu spune dacă un mod e de server sau de client - citește descrierea de pe Nexus.': 'Nexus does not say whether a mod is server or client - read its description on Nexus.',
     'După instalare îl marchezi la': 'After installing, mark it under', '(Server / Client).': '(Server / Client).', 'Doar arhivele .zip și .7z se pot instala automat.': 'zip, 7z, rar and bare DLLs install automatically.',
     'endorsements': 'endorsements', 'Fișiere': 'Files', 'Niciun fișier activ.': 'No active files.',
+    // ---- queue / background restart ----
+    "Repornesc serverul...": "Restarting the server...",
+    "repornesc serverul...": "restarting the server...",
+    "Poți instala în continuare - sincronizez după restart.": "You can keep installing - the sync runs after the restart.",
+    "În coadă": "Queued",
+    "în coadă": "queued",
+    "Serverul repornește acum - sincronizez imediat după.": "The server is restarting - the sync runs right after.",
+    "Serverul repornește acum - așteaptă să termine.": "The server is restarting - wait for it to finish.",
+    "Dezinstalat - serverul se sincronizează după ce termin tot ce e în coadă.": "Uninstalled - the server syncs once everything in the queue is done.",
+    "Dezinstalat. Apasă „Sincronizează acum” când ai terminat.": "Uninstalled. Press \"Sync now\" when you are done.",
     // ---- Nexus on join ----
     "Cheia ta Nexus Mods": "Your Nexus Mods key",
     "Salvează și continuă": "Save and continue",
@@ -255,6 +265,9 @@
     'Nu găsesc Valheim (Steam). Alege folderul jocului în Setări.': 'Valheim not found (Steam). Choose the game folder in Settings.',
   };
   const PATTERNS = [
+    [/^(\d+) în coadă$/, '$1 queued'], [/^lucrez · (\d+) în coadă$/, 'working · $1 queued'],
+    [/^(.+): în coadă - se instalează după ce termin ce fac acum\.$/, '$1: queued - installed after the current job.'],
+    [/^(.+): în coadă - se dezinstalează după ce termin ce fac acum\.$/, '$1: queued - uninstalled after the current job.'],
     [/^Serverul folosește moduri de pe Nexus Mods \((.+?)\)\. Ca să le descarc .*$/, (m, l) => `The server uses mods from Nexus Mods (${l.replace(/ și încă (\d+)$/, ' and $1 more')}). To download them Bifrost needs your personal key: the page nexusmods.com → Settings → API Keys has opened - copy the "Personal API Key" there and paste it here. Premium: everything downloads by itself. Free account: Bifrost opens each file's page and you press "Slow download" there, the rest is automatic.`],
     [/^Serverul are (\d+) (mod|moduri) de pe Nexus Mods$/, (m, n) => `The server has ${n} ${n === '1' ? 'mod' : 'mods'} from Nexus Mods`],
     [/^(.+) instalat\. Încă (\d+) de pe Nexus - pe pagina care se deschide apasă „Slow download”\.$/, '$1 installed. $2 more from Nexus - press "Slow download" on the page that opens.'],

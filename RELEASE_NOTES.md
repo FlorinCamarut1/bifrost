@@ -1,14 +1,6 @@
-﻿## Bifrost 1.7.0
+﻿## Bifrost 1.8.0 - install queue, background restart, faster sync
 
-**Nexus mods when joining a server**
-- If the server needs mods from Nexus Mods and you have no Nexus key yet, the Play page says so right after the invite, and PLAY asks for the key (the Nexus API key page opens next to it). After the key is saved, PLAY continues by itself.
-- Premium: everything downloads by itself. Free account (Nexus allows downloads for free accounts only through its website): Bifrost opens each file's page in turn - one "Slow download" click per file - and starts Valheim by itself after the last one.
-
-**Everything in English**
-- The Log page, Recent activity and the log file are in English now (sync, installs, restarts, errors), as are the job names and sync reasons.
-- "1 mod" / "1 server" instead of "1 mods".
-
-**Also**
-- Nexus' "Jotunn the Valheim Library" is recognized as the Thunderstore Jotunn you have; translations, patches and look-alike mods stay installable.
-- Personal profiles: the Play page no longer shows the server address / join code rows.
-- Players: a list without join code or address shows no "starting..." in the top bar.
+- **Install queue**: press *Install* / *Uninstall* / *Update* on as many mods as you like - while Bifrost is busy they show *Queued* and run one after another. The auto-sync waits until the queue is empty, so a batch of changes goes to the server in one sync and one restart.
+- **The server restart runs in the background**: while it waits for the server to come back (join code), you can keep installing and removing mods; a sync asked for meanwhile runs right after the restart.
+- **Faster restart after a sync** (valheim-server Docker image): Bifrost copies the mods into the game the way the container's start does and restarts only the game process - no container restart, no Steam update check. If that is not possible it falls back to the full restart. *Restart server* (the button) still restarts the whole container.
+- **Faster comparison**: the server's files are only hashed when they changed (by size and date) - comparing 342 mod files went from ~3.4 s to ~0.5 s, configs from ~0.8 s to ~0.4 s, with identical results.

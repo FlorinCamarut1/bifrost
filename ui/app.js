@@ -100,7 +100,9 @@ function renderStatus() {
 function renderWatch() {
   const w = S.watch, j = S.job, auto = S.settings.autoSync;
   let ring = 'ok', title = 'Serverul e la zi', sub = '';
-  if (j) { ring = 'busy'; title = j.label; sub = `a început ${ago(j.started)}`; }
+  const q = S.queue || [];
+  if (j) { ring = 'busy'; title = j.label; sub = `a început ${ago(j.started)}${q.length ? ` · ${q.length} în coadă` : ''}`; }
+  else if (w.restarting) { ring = 'busy'; title = 'Repornesc serverul...'; sub = 'Poți instala în continuare - sincronizez după restart.'; }
   else if (!auto) { ring = 'off'; title = w.dirty ? 'Ai schimbări nesincronizate' : 'Auto-sync oprit'; sub = 'Apasă „Sincronizează acum” când vrei.'; }
   else if (w.state === 'change') { ring = 'busy'; title = 'Thunderstore schimbă modurile...'; sub = `sincronizez după ${S.settings.quietSeconds}s de liniște`; }
   else if (w.state === 'waiting') { ring = 'wait'; title = 'Restart amânat - sunt jucători online'; sub = w.retryAt ? `reîncerc la ${clock(w.retryAt)} (serverul repornește când e gol)` : ''; }
@@ -122,9 +124,10 @@ function renderWatch() {
 
   const side = $('#side-sync'), dot = side.querySelector('.dot');
   dot.className = `dot ${j ? 'busy' : !auto ? '' : ring === 'ok' ? 'ok' : ring === 'wait' ? 'warn' : ring === 'err' ? 'err' : 'busy'}`;
-  $('#side-sync-text').textContent = j ? 'lucrez...' : !auto ? 'oprit' : (w.text || '');
+  $('#side-sync-text').textContent = j ? (q.length ? `lucrez · ${q.length} în coadă` : 'lucrez...') : w.restarting ? 'repornesc serverul...' : !auto ? 'oprit' : (w.text || '');
   $$('[data-act="sync"]').forEach(b => b.disabled = !!j);
-  $$('[data-act="restart"],[data-act="dryrun"],[data-act="publishModpack"],[data-act="buildModpack"],[data-act="fixcode"]').forEach(b => b.disabled = !!j);
+  $$('[data-act="restart"],[data-act="fixcode"]').forEach(b => b.disabled = !!j || !!w.restarting);
+  $$('[data-act="dryrun"],[data-act="publishModpack"],[data-act="buildModpack"]').forEach(b => b.disabled = !!j);
   $$('.seg[data-name] button').forEach(b => { if (!b.dataset.lock) b.disabled = !!j; });
 
   const pend = $('#mods-pending');
@@ -171,7 +174,7 @@ function renderMods() {
     const sd = modSide(m), u = S.updates[m.name];
     const icon = m.icon ? `<img class="mod-icon" src="${esc(m.icon)}" alt="" loading="lazy">` : `<div class="mod-icon">${esc((m.displayName || '?')[0])}</div>`;
     const badges = [
-      hasUpdate(m) ? (S.installing[m.name] ? `<span class="badge pending">se actualizează...</span>` : `<button class="badge update" data-update="${esc(m.name)}" data-ver="${esc(u.latest)}" title="Actualizează prin Thunderstore Mod Manager">update ${esc(u.latest)} ↻</button>`) : '',
+      hasUpdate(m) ? (S.installing[m.name] ? `<span class="badge pending">${S.installing[m.name].queued ? 'în coadă' : 'se actualizează...'}</span>` : `<button class="badge update" data-update="${esc(m.name)}" data-ver="${esc(u.latest)}" title="Actualizează prin Thunderstore Mod Manager">update ${esc(u.latest)} ↻</button>`) : '',
       !m.enabled ? '<span class="badge off">dezactivat</span>' : '',
       m.manual ? (m.nexus ? `<button class="badge onsrv" data-nexus="${esc(m.name)}" title="Prietenii îl iau de pe Nexus (${esc(m.nexus.title)} ${esc(m.nexus.version || '')})">nexus ${esc(m.nexus.modId)}</button>`
         : `<button class="badge off" data-nexus="${esc(m.name)}" title="Leagă-l de pagina lui de pe Nexus ca prietenii să-l poată instala">manual · leagă de Nexus</button>`) : '',
@@ -185,7 +188,7 @@ function renderMods() {
       : m.modpack ? '' :
         `<div class="seg" data-name="${esc(m.name)}"><button class="server ${sd === 'server' ? 'on' : ''}" data-side="server" ${busy ? 'disabled' : ''}>Server</button><button class="client ${sd === 'client' ? 'on' : ''}" data-side="client" ${busy ? 'disabled' : ''}>Client</button></div>`;
     // one grid cell for all the actions, so they stay on the right of the row
-    const uninstall = m.builtin || m.name === 'denikson-BepInExPack_Valheim' ? '' : `<button class="icon-btn" data-uninstall="${esc(m.name)}" title="Dezinstalează" ${busy ? 'disabled' : ''}>✕</button>`;
+    const uninstall = m.builtin || m.name === 'denikson-BepInExPack_Valheim' ? '' : `<button class="icon-btn" data-uninstall="${esc(m.name)}" title="Dezinstalează">✕</button>`;
     return `<div class="mod ${m.enabled ? '' : 'disabled'}">
       ${icon}
       <div class="mod-body">
@@ -203,8 +206,9 @@ $('#mod-list').addEventListener('click', async e => {
   const un = e.target.closest('[data-uninstall]');
   if (un) {
     if (!await confirmBox('Dezinstalezi?', `${un.dataset.uninstall}\nDacă e mod de server, îl scot și de pe server (la următorul restart) și din lista prietenilor.`, 'Dezinstalează')) return;
+    if (S.job || S.queue?.length) toast(`${un.dataset.uninstall}: în coadă - se dezinstalează după ce termin ce fac acum.`, 'info');
     const r = await window.vp.act('remove', un.dataset.uninstall);
-    toast(r.ok ? 'Dezinstalat - sincronizez serverul.' : r.error, r.ok ? 'ok' : 'error');
+    toast(r.ok ? (S.settings.autoSync ? 'Dezinstalat - serverul se sincronizează după ce termin tot ce e în coadă.' : 'Dezinstalat. Apasă „Sincronizează acum” când ai terminat.') : r.error, r.ok ? 'ok' : 'error');
     return;
   }
   const nx = e.target.closest('[data-nexus]');
@@ -430,6 +434,7 @@ const crossLabel = (m, store) => `<button class="btn small installed" disabled t
 function pkButton(p, big) {
   const cls = big ? 'btn' : 'btn small';
   const have = installedVer(p.full);
+  if (S.installing[p.full]?.queued) return `<button class="${cls} working" disabled>În coadă</button>`;
   if (S.installing[p.full]) return `<button class="${cls} working" disabled>Se instalează</button>`;
   if (have && cmpVer(p.ver, have) > 0) return `<button class="${cls} update" data-install="${esc(p.full)}">Update la ${esc(p.ver)}</button>`;
   if (have) return `<button class="${cls} installed" disabled>✓ Instalat</button>`;
@@ -613,8 +618,10 @@ async function installPkg(full, ver) {
   const p = S.catalog?.find(x => x.full === full);
   const tmm = 'Se deschide Thunderstore Mod Manager și instalează modul în profilul tău (dacă cere, confirmă acolo).';
   if (!S.settings.isAdmin) toast(`Instalez ${full}...`);
+  if (S.job || S.queue?.length) toast(`${full}: în coadă - se instalează după ce termin ce fac acum.`, 'info');
   const r = await window.vp.act('install', { full, ver: ver || p?.ver });
   if (!r.ok) { toast(r.error, 'error'); return; }
+  if (r.already) return;
   if (r.via === 'tmm') toast(`${full}: ${tmm}${r.side ? ` Marcat „${r.side}” după categoriile Thunderstore.` : ''}`, 'ok');
   else toast(`${full} instalat. Pornește-l cu JOACĂ.`, 'ok');
 }
@@ -1201,6 +1208,7 @@ window.vp.on((ch, d) => {
   else if (ch === 'list') { S.list = d; renderList(); }
   else if (ch === 'appUpdate') { S.appUpdate = d; renderAppUpdate(); }
   else if (ch === 'job') { S.job = d; renderWatch(); renderMods(); renderPlayer(); }
+  else if (ch === 'queue') { S.queue = d; renderWatch(); }
   else if (ch === 'watch') { S.watch = d; renderWatch(); }
   else if (ch === 'log') addLog(d);
   else if (ch === 'updates') { S.updates = d; renderMods(); }
@@ -1213,7 +1221,7 @@ window.vp.on((ch, d) => {
 
 (async () => {
   const d = await window.vp.init();
-  Object.assign(S, { settings: d.settings, profile: d.profile, status: d.status, job: d.job, watch: d.watch, updates: d.updates, modpack: d.modpack, game: d.game || {}, installing: d.installing || {}, catalogFetched: d.catalogFetched, player: d.player, list: d.list || {}, appUpdate: d.appUpdate });
+  Object.assign(S, { settings: d.settings, profile: d.profile, status: d.status, job: d.job, watch: d.watch, updates: d.updates, modpack: d.modpack, game: d.game || {}, queue: d.queue || [], installing: d.installing || {}, catalogFetched: d.catalogFetched, player: d.player, list: d.list || {}, appUpdate: d.appUpdate });
   logEntries = d.log; $('#log').innerHTML = d.log.map(logLine).join('\n') + '\n';
   $('#about').textContent = `Bifrost ${d.version}${d.settings.packaged ? '' : ' (din sursă)'} · ${(d.settings.servers || []).length} servere`;
   applyLang();
