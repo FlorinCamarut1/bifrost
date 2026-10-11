@@ -99,8 +99,8 @@ function loadSettings() {
   const broken = SETTINGS_FILE.replace(/\.json$/, `.broken-${Date.now()}.json`);
   try { fs.copyFileSync(SETTINGS_FILE, broken); } catch { }
   const bak = readJson(SETTINGS_FILE + '.bak', null);
-  settingsNotes.push(bak ? `settings.json era stricat - am folosit copia bună de la pornirea anterioară (cel stricat e păstrat ca ${path.basename(broken)})`
-    : `settings.json era stricat și nu am o copie - păstrez fișierul stricat ca ${path.basename(broken)}`);
+  settingsNotes.push(bak ? `settings.json was damaged - the good copy from the previous start was used (the damaged one is kept as ${path.basename(broken)})`
+    : `settings.json was damaged and there is no copy - the damaged file is kept as ${path.basename(broken)}`);
   return bak && typeof bak === 'object' ? bak : {};
 }
 let G = { ...GLOBAL_DEFAULTS, ...loadSettings() };
@@ -532,7 +532,7 @@ async function installThunderstore(item, wanted) {
 async function installNexus(entry, nxm) {
   const pr = getProfile();
   const key = dec(G.nexusKeyEnc);
-  if (!key) throw new Error('Pune cheia Nexus în Setări.');
+  if (!key) throw new Error('Put your Nexus key in Settings.');
   nexus.key = key;
   const url = await nexus.downloadUrl(entry.modId, entry.fileId, nxm);
   setProgress({ ...progress, text: `${entry.title} (Nexus)`, bytes: 0, totalBytes: 0 });
@@ -553,12 +553,12 @@ function hintSide(name, side) {
 
 // a mod picked in Descoperă (players: their own extra; admins: goes to the server too)
 async function installPackage(full, ver) {
-  if (!srv()) return { ok: false, error: 'Adaugă sau creează întâi un server.' };
+  if (!srv()) return { ok: false, error: 'Add or create a server first.' };
   if (job || queue.length || pumping) return enqueue(`Install ${full}`, full, () => installPackageNow(full, ver));
   return installPackageNow(full, ver);
 }
 async function installPackageNow(full, ver) {
-  if (!srv()) return { ok: false, error: 'Adaugă sau creează întâi un server.' };
+  if (!srv()) return { ok: false, error: 'Add or create a server first.' };
   const p = catalogIndex.get(full);
   ver = ver || p?.ver;
   if (!ver) return { ok: false, error: 'Nu găsesc pachetul în catalog.' };
@@ -584,7 +584,7 @@ function removePackageNow(key) {
   if (p.role === 'required') return { ok: false, error: 'Serverul are nevoie de el.' };
   if (key === BEPINEX) return { ok: false, error: 'BepInEx e baza tuturor modurilor - nu se scoate.' };
   const users = Object.entries(pr.packages).filter(([k, x]) => k !== key && (x.deps || []).some(d => parseDep(d)?.full === key)).map(([k]) => k);
-  if (users.length) return { ok: false, error: `Au nevoie de el: ${users.join(', ')}. Scoate-le întâi pe acelea.` };
+  if (users.length) return { ok: false, error: `Needed by: ${users.join(', ')}. Remove those first.` };
   if (p.role === 'recommended') { const s = srv(); delete s.recommended[key]; delete s.nexusChosen[key]; saveSettings(); }
   pr.remove(key);
   for (const k of pr.orphans()) pr.remove(k);
@@ -723,18 +723,18 @@ async function launchGame() {
     await getProfile().launch(game, join.args);
   } catch (e) { gameState.launching = false; sendGame(); throw e; }
   log(`Starting Valheim with the "${srv().name}" profile (${game.game})${join.target ? ` - joining ${join.target} directly${join.password ? ' with the saved password' : ''}` : ''}`, 'done');
-  if (join.target) toast(`Alege caracterul și apasă Start - intri direct pe server${join.password ? '' : ' (fără parolă salvată: o scrii în joc dacă serverul are)'}.`, 'ok');
+  if (join.target) toast(`Pick the character and press Start - you go straight to the server${join.password ? '' : ' (no saved password: type it in the game if the server has one)'}.`, 'ok');
   else if (srv().directJoin !== false && (status.joinCode || manifest?.server?.joinCode)) {
     const code = status.joinCode || manifest.server.joinCode;
     clipboard.writeText(code);
-    toast(`Nu știu adresa serverului, așa că am copiat join code-ul ${code}: în joc Join game → Add server → Ctrl+V.`, 'info');
+    toast(`The server's address is not known, so the join code ${code} was copied: in the game Join game → Add server → Ctrl+V.`, 'info');
   }
   // "launching" until the game process shows up (Steam can take a while), at most 2 minutes
   const until = Date.now() + 120e3;
   (async () => { while (gameState.launching && Date.now() < until) { await new Promise(r => setTimeout(r, 2000)); await checkGameProcess(); } if (gameState.launching) { gameState.launching = false; sendGame(); } })();
 }
 async function playerSync({ launch } = {}) {
-  if (!srv()) return { ok: false, error: 'Adaugă sau creează întâi un server.' };
+  if (!srv()) return { ok: false, error: 'Add or create a server first.' };
   if (job) return { ok: false, error: 'Lucrez deja.' };
   // admins and personal profiles (no list): the profile is the source - just play
   if (isAdmin() || !srv().list) {
@@ -744,7 +744,7 @@ async function playerSync({ launch } = {}) {
   log(`▶ ${job.label}`, 'start');
   try {
     await refreshManifest();
-    if (!manifest) throw new Error(`Nu am lista serverului (${manifestErr || 'necunoscut'}).`);
+    if (!manifest) throw new Error(`No server list (${manifestErr || 'unknown'}).`);
     const pr = getProfile();
     const want = desired();
     const wanted = new Set(want.map(d => d.key));
@@ -768,7 +768,7 @@ async function playerSync({ launch } = {}) {
       send('player', playerInfo());
       shell.openExternal(Nexus.filesPage(nexusWaiting[0].modId, nexusWaiting[0].fileId));
       const missing = nexusWaiting.filter(n => n.role === 'required');
-      if (missing.length) throw new Error(`Mai trebuie de pe Nexus: ${missing.map(n => n.title).join(', ')} - apasă „Slow download” pe pagina care s-a deschis.`);
+      if (missing.length) throw new Error(`Still needed from Nexus: ${missing.map(n => n.title).join(', ')} - press "Slow download" on the page that opened.`);
       toast('Pe pagina Nexus care s-a deschis apasă „Slow download” - Bifrost îl instalează singur.', 'info');
     }
     log(`■ Mods are up to date (${Object.keys(pr.packages).length} packages)`, 'done');
@@ -809,7 +809,7 @@ const modsPayload = () => {
   return p;
 };
 function setSide(name, side) {
-  if (job) return { ok: false, error: 'O sincronizare rulează acum - încearcă după ce termină.' };
+  if (job) return { ok: false, error: 'A sync is running - try again when it is done.' };
   const st = readState(); st.mods[name] = side; writeState(st);
   log(`${name} -> ${side}`);
   send('mods', modsPayload());
@@ -830,8 +830,8 @@ function signature() {
 async function confirmMass(list) {
   showWindow();
   const r = await dialog.showMessageBox(win, {
-    type: 'warning', buttons: ['Anulează', 'Scoate-le de pe server'], defaultId: 0, cancelId: 0, title: 'Bifrost',
-    message: `S-ar scoate ${list.length} moduri de pe server`, detail: `${list.join(', ')}\n\nUn profil gol sau greșit arată exact așa. Continui?`,
+    type: 'warning', buttons: ['Cancel', 'Remove them from the server'], defaultId: 0, cancelId: 0, title: 'Bifrost',
+    message: `${list.length} mods would be removed from the server`, detail: `${list.join(', ')}\n\nAn empty or wrong profile looks exactly like this. Continue?`,
   });
   return r.response === 1;
 }
@@ -839,7 +839,7 @@ async function confirmMass(list) {
 async function syncNow(reason) {
   const s = srv();
   if (!isAdmin() || !s.conn) return;
-  if (job) { toast('Rulează deja ceva - aștept să termine.'); return; }
+  if (job) { toast('Something is already running - waiting for it to finish.'); return; }
   if (restarting) {
     syncAfterRestart = reason;
     if (reason === 'manual') toast('Serverul repornește acum - sincronizez imediat după.', 'info');
@@ -859,8 +859,8 @@ async function syncNow(reason) {
     });
     writeState(st);
     for (const n of r.newMods) log(`  ${n.name} -> ${n.side} (${n.why})`, 'out');
-    const what = [r.copy.length && `Actualizat: ${r.copy.join(', ')}`, r.remove.length && `Scos: ${r.remove.join(', ')}`,
-    r.newMods.length && `Moduri noi (ghicit): ${r.newMods.map(n => `${n.name} → ${n.side}`).join('; ')}`].filter(Boolean).join('\n');
+    const what = [r.copy.length && `Updated: ${r.copy.join(', ')}`, r.remove.length && `Removed: ${r.remove.join(', ')}`,
+    r.newMods.length && `New mods (guessed): ${r.newMods.map(n => `${n.name} → ${n.side}`).join('; ')}`].filter(Boolean).join('\n');
     log(`■ Sync: ${r.copy.length} copied, ${r.remove.length} removed`, 'done');
     syncedSig = sig; failStreak = 0; watch.lastSync = Date.now();
     setJob(null);
@@ -868,14 +868,14 @@ async function syncNow(reason) {
   } catch (e) {
     setJob(null);
     if (e.code === 'MASS_REMOVAL') {
-      watch.lastResult = { kind: 'warn', text: `Oprit: ${e.message}` }; syncedSig = sig;
-      notify('Bifrost: sincronizare oprită', e.message, 'warn'); setWatch('attention', 'necesită atenție');
+      watch.lastResult = { kind: 'warn', text: `Stopped: ${e.message}` }; syncedSig = sig;
+      notify('Bifrost: sync stopped', e.message, 'warn'); setWatch('attention', 'needs attention');
     } else {
       failStreak++;
-      watch.lastResult = { kind: 'error', text: `Eroare: ${e.message}` };
+      watch.lastResult = { kind: 'error', text: `Error: ${e.message}` };
       watch.retryAt = Date.now() + 5 * 60e3;
       log(`■ Sync failed: ${e.message}`, 'error');
-      if (failStreak === 1) notify('Bifrost: sincronizarea a eșuat', `${e.message}\nReîncerc în 5 minute.`, 'warn');
+      if (failStreak === 1) notify('Bifrost: sync failed', `${e.message}\nRetrying in 5 minutes.`, 'warn');
       setWatch('error', 'eroare - reîncerc');
     }
   } finally { watch.dirty = signature() !== syncedSig; send('mods', modsPayload()); send('watch', watch); }
@@ -886,17 +886,17 @@ async function maybeRestart({ manual, what = '', force } = {}) {
   if (restarting) return { ok: true, already: true };
   const s = srv(), tr = transport(), st = readState();
   if (!st.restartPending && !force) {
-    watch.lastResult = { kind: 'ok', text: 'Serverul e la zi', what };
-    if (manual) toast('Serverul e la zi.', 'ok');
+    watch.lastResult = { kind: 'ok', text: 'The server is up to date', what };
+    if (manual) toast('The server is up to date.', 'ok');
     setWatch('idle', 'la zi');
     schedulePublish('mods synced'); setTimeout(() => twoWay('after sync'), 1500);
     return { ok: true };
   }
   if (!tr.canRestart) {
     st.restartPending = false; writeState(st);
-    watch.lastResult = { kind: 'wait', text: 'Moduri copiate - repornește serverul din panoul hostului', what };
-    notify('Moduri copiate pe server', `${what}\nRepornește serverul din panoul hostului ca să le încarce.`.trim());
-    setWatch('waiting', 'așteaptă restart manual');
+    watch.lastResult = { kind: 'wait', text: 'Mods copied - restart the server from the host\'s panel', what };
+    notify('Mods copied to the server', `${what}\nRestart the server from the host's panel to load them.`.trim());
+    setWatch('waiting', 'waiting for a manual restart');
     setTimeout(() => twoWay('after sync'), 1500);
     return { ok: true, manualRestart: true };
   }
@@ -904,17 +904,17 @@ async function maybeRestart({ manual, what = '', force } = {}) {
     let idle = await tr.isIdle().catch(() => null);
     if (idle === null) idle = await steamPlayers().then(p => p === 0).catch(() => null);
     if (idle !== true) {
-      watch.lastResult = { kind: 'wait', text: idle === false ? 'Moduri copiate - restartul așteaptă să iasă jucătorii' : 'Moduri copiate - nu știu dacă e cineva pe server, restartul îl faci tu', what };
+      watch.lastResult = { kind: 'wait', text: idle === false ? 'Mods copied - the restart waits for the players to leave' : 'Mods copied - it is unknown whether anyone is on, restart it yourself', what };
       watch.retryAt = idle === false ? Date.now() + s.retryMinutes * 60e3 : null;
-      notify('Moduri copiate pe server', `${what}\n${idle === false ? 'Sunt jucători online - serverul repornește când se golește.' : 'Apasă Restart server când nu e nimeni.'}`.trim());
-      setWatch('waiting', idle === false ? 'restart după ce iese lumea' : 'restart manual');
+      notify('Mods copied to the server', `${what}\n${idle === false ? 'Players are online - the server restarts when it is empty.' : 'Press Restart server when nobody is on.'}`.trim());
+      setWatch('waiting', idle === false ? 'restart once players leave' : 'manual restart');
       setTimeout(() => twoWay('after sync'), 1500);
       return { ok: true, postponed: true };
     }
   }
   const r = await restartServer({ fast: !force });
-  watch.lastResult = { kind: 'ok', text: r.joinCode ? `Server repornit - join code ${r.joinCode}` : 'Server repornit', what };
-  notify('Serverul Valheim e actualizat', `${what}\nRepornit${r.joinCode ? ` - join code ${r.joinCode}` : ''}`.trim());
+  watch.lastResult = { kind: 'ok', text: r.joinCode ? `Server restarted - join code ${r.joinCode}` : 'Server restarted', what };
+  notify('The Valheim server is updated', `${what}\nRestarted${r.joinCode ? ` - join code ${r.joinCode}` : ''}`.trim());
   setWatch('idle', 'la zi');
   pollStatus(); schedulePublish('restart'); setTimeout(() => twoWay('after restart'), 1500);
   return { ok: true, joinCode: r.joinCode };
@@ -972,7 +972,7 @@ function tick() {
     return;
   }
   if (changedAt && sig === syncedSig) { changedAt = null; watch.dirty = false; setWatch('idle', 'la zi'); }
-  if (!s.autoSync) { if (watch.dirty && watch.state !== 'off') setWatch('off', 'auto-sync oprit - ai schimbări nesincronizate'); return; }
+  if (!s.autoSync) { if (watch.dirty && watch.state !== 'off') setWatch('off', 'auto-sync off - you have unsynced changes'); return; }
   if (changedAt && Date.now() - changedAt >= s.quietSeconds * 1000) { syncNow('mods changed'); return; }
   if (watch.retryAt && Date.now() >= watch.retryAt) { watch.retryAt = null; if (readState().restartPending) maybeRestart({}); else syncNow('retry'); }
 }
@@ -1161,7 +1161,7 @@ async function twoWay(reason) {
       }
       if (res.mods.length) {
         const st2 = readState(); for (const n of res.mods) st2.mods[n] = 'server'; writeState(st2);
-        notify('Moduri aduse de pe server', res.mods.join(', '));
+        notify('Mods brought from the server', res.mods.join(', '));
         send('mods', modsPayload());
       }
     }
@@ -1205,9 +1205,9 @@ async function publishList(reason) {
   if (!isAdmin() || listState.busy) return { ok: false, error: 'ocupat' };
   const list = { ...buildList(), updatedAt: Date.now() };
   if (!list.required.length) { listState.error = 'Profilul nu are moduri de server - nu public lista.'; send('list', listState); return { ok: false, error: listState.error }; }
-  if (readState().restartPending) { listState.error = 'Serverul nu a repornit încă cu modurile noi - public după restart.'; send('list', listState); return { ok: false, error: listState.error }; }
+  if (readState().restartPending) { listState.error = 'The server has not restarted with the new mods yet - the list is published after the restart.'; send('list', listState); return { ok: false, error: listState.error }; }
   const token = await githubToken();
-  if (!token) { listState.error = 'Conectează-te la GitHub (Setări → GitHub) ca să public lista.'; send('list', listState); return { ok: false, error: listState.error }; }
+  if (!token) { listState.error = 'Connect to GitHub (Settings → GitHub) to publish the list.'; send('list', listState); return { ok: false, error: listState.error }; }
   listState.busy = true; send('list', listState);
   try {
     const r = await listhost.publish(fetchN, token, s.list || { kind: 'gist' }, list, reason);
@@ -1278,10 +1278,10 @@ async function tsApi(token, method, p, body) {
 }
 async function publishModpack() {
   const s = srv(), token = dec(s.tsTokenEnc);
-  if (!token) return { ok: false, error: 'Lipsește tokenul Thunderstore (Setări).' };
+  if (!token) return { ok: false, error: 'The Thunderstore token is missing (Settings).' };
   const b = await buildModpack();
   const zip = b.info.zip;
-  if (!zip) return { ok: false, error: 'Nu găsesc zip-ul construit.' };
+  if (!zip) return { ok: false, error: 'The built zip is not found.' };
   setJob({ kind: 'publish', label: `Publishing ${path.basename(zip)}`, started: Date.now() });
   let uuid = null;
   try {
@@ -1326,11 +1326,11 @@ function activate(id) {
 }
 async function addServer(invite) {
   const src = listhost.parseInvite(invite);
-  if (!src) return { ok: false, error: 'Nu recunosc invitația - lipește linkul sau codul primit (ex. g.1a2b3c...).' };
+  if (!src) return { ok: false, error: 'This invite is not recognized - paste the link or code you got (e.g. g.1a2b3c...).' };
   const existing = G.servers.find(s => JSON.stringify(s.list) === JSON.stringify(src));
   if (existing) { activate(existing.id); return { ok: true, id: existing.id, existed: true }; }
   let m;
-  try { m = await listhost.fetchList(fetchN, src); } catch (e) { return { ok: false, error: `Nu pot citi lista serverului: ${e.message}` }; }
+  try { m = await listhost.fetchList(fetchN, src); } catch (e) { return { ok: false, error: `The server list cannot be read: ${e.message}` }; }
   const name = m.server?.name || 'Server';
   const id = uniqueId(name);
   G.servers.push({ ...SERVER_DEFAULTS, id, name, role: 'player', list: src, profileDir: path.join(DATA, 'profiles', id), createdAt: Date.now() });
@@ -1425,7 +1425,7 @@ async function importInto(source) {
 }
 function removeServer(id) {
   const s = G.servers.find(x => x.id === id);
-  if (!s) return { ok: false, error: 'nu există' };
+  if (!s) return { ok: false, error: 'not found' };
   if (job) return { ok: false, error: 'Lucrez deja.' };
   G.servers = G.servers.filter(x => x.id !== id);
   // its profile and data; the shared download cache stays
@@ -1448,17 +1448,17 @@ async function nexusInstallNow(e, nxm) {
     delete nexusPending[e.modId];
     nexusWaiting = nexusWaiting.filter(n => n.modId !== e.modId);
     log(`■ ${e.title} installed`, 'done');
-    notify('Instalat de pe Nexus', e.title);
+    notify('Installed from Nexus', e.title);
     return { ok: true };
   } catch (err) { log(`■ Nexus: ${err.message}`, 'error'); return { ok: false, error: err.message }; }
   finally { setProgress(null); setJob(null); send('nexusPending', nexusPending); afterProfileChange(); }
 }
 async function nexusInstall({ modId, fileId, title, version, fileName }) {
-  if (!srv()) return { ok: false, error: 'Adaugă sau creează întâi un server.' };
+  if (!srv()) return { ok: false, error: 'Add or create a server first.' };
   if (!dec(G.nexusKeyEnc)) return { ok: false, error: 'Pune întâi cheia ta Nexus în Setări → Nexus Mods.', needKey: true };
   if (!fileId) {
     const f = Nexus.pickMain(await nexus.modFiles(modId));
-    if (!f) return { ok: false, error: 'Modul nu are fișiere de descărcat.' };
+    if (!f) return { ok: false, error: 'The mod has no files to download.' };
     fileId = f.fileId; version = version || f.version;
   }
   const e = { modId: +modId, fileId: +fileId, title, version, fileName };
@@ -1472,14 +1472,14 @@ async function handleLink(url) {
   showWindow();
   if (/^bifrost:\/\//i.test(url)) {
     const r = await addServer(url);
-    toast(r.ok ? (r.existed ? 'Serverul era deja adăugat.' : `Server adăugat: ${r.name}. Apasă JOACĂ.`) : r.error, r.ok ? 'ok' : 'error');
+    toast(r.ok ? (r.existed ? 'The server was already added.' : `Server added: ${r.name}. Press PLAY.`) : r.error, r.ok ? 'ok' : 'error');
     return;
   }
   const x = Nexus.parseNxm(url);
-  if (!x) return toast('Link Nexus nevalid.', 'error');
-  if (x.game !== 'valheim') return toast(`Linkul e pentru ${x.game}, nu Valheim.`, 'error');
-  if (job) return toast('Lucrez deja - apasă din nou după ce termin.', 'error');
-  if (!srv()) return toast('Adaugă sau creează întâi un server.', 'error');
+  if (!x) return toast('Invalid Nexus link.', 'error');
+  if (x.game !== 'valheim') return toast(`The link is for ${x.game}, not Valheim.`, 'error');
+  if (job) return toast('Already working - press again when it is done.', 'error');
+  if (!srv()) return toast('Add or create a server first.', 'error');
   const pend = nexusPending[x.modId];
   const want = nexusWaiting.find(n => n.modId === x.modId) || (manifest?.nexus || []).filter(n => n.modId === x.modId)
     .map(n => ({ modId: n.modId, title: n.title, version: n.version, role: n.required ? 'required' : 'recommended' }))[0];
@@ -1490,13 +1490,13 @@ async function handleLink(url) {
   if (!r.ok) { toast(r.error, 'error'); return; }
   if (nexusWaiting.length) {
     // next file: its page opens by itself, one click there each
-    toast(`${e.title} instalat. Încă ${nexusWaiting.length} de pe Nexus - pe pagina care se deschide apasă „Slow download”.`, 'ok');
+    toast(`${e.title} installed. ${nexusWaiting.length} more from Nexus - press "Slow download" on the page that opens.`, 'ok');
     shell.openExternal(Nexus.filesPage(nexusWaiting[0].modId, nexusWaiting[0].fileId));
   } else if (resumePlay) {
     resumePlay = false;
-    toast(`${e.title} instalat - toate modurile de pe Nexus sunt gata, pornesc Valheim.`, 'ok');
+    toast(`${e.title} installed - all Nexus mods are ready, starting Valheim.`, 'ok');
     setTimeout(() => playerSync({ launch: true }).then(res => { if (!res.ok && res.error) toast(res.error, 'error'); }), 800);
-  } else toast(`${e.title} instalat.`, 'ok');
+  } else toast(`${e.title} installed.`, 'ok');
 }
 
 // =====================================================================================================
@@ -1517,7 +1517,7 @@ async function checkAppUpdate() {
     await codeupdate.install({ download: (u, f, size) => new Profile({ dir: path.join(DATA, 'app'), cacheDir: path.join(DATA, 'app'), fetch: fetchN }).download(u, f, null, size), appData: app.getPath('appData'), version: r.latest, bundle: r.bundle, electronMajor: ELECTRON_MAJOR });
     appUpdate = { ...base, version: r.latest, ready: true }; send('appUpdate', appUpdate);
     log(`Bifrost ${r.latest} downloaded - used from the next start`, 'done');
-    notify('Bifrost', `Versiunea ${r.latest} e gata - repornește Bifrost ca s-o folosești.`);
+    notify('Bifrost', `Version ${r.latest} is ready - restart Bifrost to use it.`);
   } catch (e) { log(`update: ${e.message}`); appUpdate = { ...(appUpdate || {}), current: OWN_VERSION, error: e.message, checkedAt: Date.now() }; send('appUpdate', appUpdate); }
   finally { updateBusy = false; }
 }
@@ -1572,7 +1572,7 @@ async function action(name, arg) {
     // ----- admin -----
     case 'sync': syncNow('manual'); return { ok: true };
     case 'dryrun': {
-      if (!s?.conn) return { ok: false, error: 'Serverul nu are conexiune.' };
+      if (!s?.conn) return { ok: false, error: 'The server has no connection.' };
       try {
         const st = readState();
         const r = await syncMods(st, { pluginsDir: pluginsDir(), transport: transport(), builtin: new RegExp(s.builtin || 'BepInExPack', 'i'), allMods: s.syncAllMods, dryRun: true });
@@ -1594,7 +1594,7 @@ async function action(name, arg) {
       return { ok: true, text, hash: sha1(text), parsed: /\.cfg$/i.test(arg) ? bepcfg.parse(text) : null };
     } catch (e) { return { ok: false, error: e.message }; }
     case 'saveConfig': try { return await saveConfig(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
-    case 'restartIdle': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, what: 'configurări noi' }); } catch (e) { return { ok: false, error: e.message }; }
+    case 'restartIdle': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, what: 'new configs' }); } catch (e) { return { ok: false, error: e.message }; }
     case 'restart': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, force: true }); } catch (e) { return { ok: false, error: e.message }; }
     case 'fixcode': try {
       if (restarting) return { ok: false, error: 'Serverul repornește acum - așteaptă să termine.' };
@@ -1610,11 +1610,11 @@ async function action(name, arg) {
     case 'nexusLink': {
       if (!arg.url) { delete s.nexusLinks[arg.name]; saveSettings(); send('mods', modsPayload()); return { ok: true }; }
       const modId = Nexus.parseModUrl(arg.url);
-      if (!modId) return { ok: false, error: 'Lipește linkul paginii Nexus (nexusmods.com/valheim/mods/...).' };
+      if (!modId) return { ok: false, error: 'Paste the link of the Nexus page (nexusmods.com/valheim/mods/...).' };
       try {
         const [m, files] = await Promise.all([nexus.modInfo(modId), nexus.modFiles(modId)]);
         const f = Nexus.pickMain(files);
-        if (!f) return { ok: false, error: 'Modul nu are fișiere.' };
+        if (!f) return { ok: false, error: 'The mod has no files.' };
         s.nexusLinks[arg.name] = { modId, fileId: f.fileId, fileName: f.name, version: f.version || m?.version, title: m?.name || f.name };
         saveSettings(); send('mods', modsPayload()); schedulePublish('Nexus link');
         return { ok: true, link: s.nexusLinks[arg.name] };
@@ -1651,7 +1651,7 @@ async function action(name, arg) {
       } catch (e) { return { ok: false, error: e.message }; }
     }
     case 'githubLogin': {
-      if (!GITHUB_CLIENT_ID) return { ok: false, error: 'Login-ul GitHub din app nu e configurat - lipește un token (scope „gist”).' };
+      if (!GITHUB_CLIENT_ID) return { ok: false, error: 'GitHub login is not set up in this build - paste a token (scope "gist").' };
       try {
         const start = await listhost.deviceStart(fetchN, GITHUB_CLIENT_ID);
         shell.openExternal(start.verification_uri);
@@ -1721,10 +1721,10 @@ async function action(name, arg) {
     }
     case 'findGame': game = await Profile.findGame(); if (Profile.isGameDir(G.gameDir)) game.game = G.gameDir; send('player', playerInfo()); return { ok: !!game.game, game };
     case 'restoreLoader': {
-      if (!game.game) return { ok: false, error: 'Nu găsesc folderul jocului.' };
+      if (!game.game) return { ok: false, error: 'The game folder is not found.' };
       const ok = Profile.restoreGame(game.game);
       send('player', playerInfo());
-      return ok ? { ok: true } : { ok: false, error: 'Nu există backup (Bifrost nu a înlocuit nimic).' };
+      return ok ? { ok: true } : { ok: false, error: 'There is no backup (Bifrost has not replaced anything).' };
     }
     case 'checkAppUpdate': await checkAppUpdate(); return { ok: true, update: appUpdate };
   }

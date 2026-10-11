@@ -1,6 +1,8 @@
 'use strict';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
+// a text with variables or inline HTML in both languages (English by default); fixed texts go through ui/i18n.js
+const L = (ro, en) => ((S.settings?.lang || 'en') === 'en' ? en : ro);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const S = { settings: {}, profile: { mods: [] }, status: {}, job: null, watch: {}, updates: {}, modpack: {}, filter: 'all', search: '',
   player: null, list: {}, appUpdate: null,
@@ -11,10 +13,10 @@ const S = { settings: {}, profile: { mods: [] }, status: {}, job: null, watch: {
 const ago = t => {
   if (!t) return '';
   const s = Math.round((Date.now() - t) / 1000);
-  if (s < 60) return 'acum câteva secunde';
-  if (s < 3600) return `acum ${Math.round(s / 60)} min`;
-  if (s < 86400) return `acum ${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
-  return `acum ${Math.round(s / 86400)} zile`;
+  if (s < 60) return L('acum câteva secunde', 'a few seconds ago');
+  if (s < 3600) return L(`acum ${Math.round(s / 60)} min`, `${Math.round(s / 60)} min ago`);
+  if (s < 86400) return L(`acum ${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`, `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min ago`);
+  return L(`acum ${Math.round(s / 86400)} zile`, `${Math.round(s / 86400)} days ago`);
 };
 const dur = t => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 const LOC = () => ((S.settings?.lang || 'en') === 'en' ? 'en-GB' : 'ro-RO');
@@ -91,7 +93,7 @@ function renderStatus() {
   // (a personal profile has no server; a server whose state is unknown shows nothing rather than "starting")
   const personal = !S.settings.isAdmin && !S.settings.server?.list;
   if (personal || s.unknown) tb = '';
-  else if (s.reachable && s.container === 'running') tb = `<span>${s.joinCode ? `cod <b>${esc(s.joinCode)}</b>` : 'pornește...'}</span><span><b>${esc(pl)}</b> online</span>`;
+  else if (s.reachable && s.container === 'running') tb = `<span>${s.joinCode ? `${L('cod', 'code')} <b>${esc(s.joinCode)}</b>` : L('pornește...', 'starting...')}</span><span><b>${esc(pl)}</b> online</span>`;
   else if (s.reachable === false) tb = '<span>server: fără conexiune</span>';
   $('#tb-status').innerHTML = tb;
 }
@@ -101,11 +103,11 @@ function renderWatch() {
   const w = S.watch, j = S.job, auto = S.settings.autoSync;
   let ring = 'ok', title = 'Serverul e la zi', sub = '';
   const q = S.queue || [];
-  if (j) { ring = 'busy'; title = j.label; sub = `a început ${ago(j.started)}${q.length ? ` · ${q.length} în coadă` : ''}`; }
+  if (j) { ring = 'busy'; title = j.label; sub = L(`a început ${ago(j.started)}`, `started ${ago(j.started)}`) + (q.length ? L(` · ${q.length} în coadă`, ` · ${q.length} queued`) : ''); }
   else if (w.restarting) { ring = 'busy'; title = 'Repornesc serverul...'; sub = 'Poți instala în continuare - sincronizez după restart.'; }
   else if (!auto) { ring = 'off'; title = w.dirty ? 'Ai schimbări nesincronizate' : 'Auto-sync oprit'; sub = 'Apasă „Sincronizează acum” când vrei.'; }
-  else if (w.state === 'change') { ring = 'busy'; title = 'Thunderstore schimbă modurile...'; sub = `sincronizez după ${S.settings.quietSeconds}s de liniște`; }
-  else if (w.state === 'waiting') { ring = 'wait'; title = 'Restart amânat - sunt jucători online'; sub = w.retryAt ? `reîncerc la ${clock(w.retryAt)} (serverul repornește când e gol)` : ''; }
+  else if (w.state === 'change') { ring = 'busy'; title = 'Thunderstore schimbă modurile...'; sub = L(`sincronizez după ${S.settings.quietSeconds}s de liniște`, `syncing after ${S.settings.quietSeconds}s without changes`); }
+  else if (w.state === 'waiting') { ring = 'wait'; title = 'Restart amânat - sunt jucători online'; sub = w.retryAt ? L(`reîncerc la ${clock(w.retryAt)} (serverul repornește când e gol)`, `retrying at ${clock(w.retryAt)} (the server restarts when it is empty)`) : ''; }
   else if (w.state === 'error') { ring = 'err'; title = 'Sincronizarea a eșuat'; sub = w.retryAt ? `reîncerc la ${clock(w.retryAt)}` : ''; }
   else if (w.state === 'attention') { ring = 'err'; title = 'Necesită atenție'; }
   else if (w.lastResult) { title = w.lastResult.text; }
@@ -119,8 +121,8 @@ function renderWatch() {
   $('#tg-autosync').checked = !!auto;
   const tw = w.twoWay;
   $('#twoway-line').innerHTML = !S.settings.ownSource ? '' : !tw ? 'Configurări: se verifică...'
-    : tw.error ? `<span style="color:var(--red)">Configurări: ${esc(tw.error)}</span>`
-      : `Configurări ${tw.push || tw.pull ? `sincronizate (↑ ${tw.push} trimise, ↓ ${tw.pull} aduse)` : 'la zi'} · ${ago(tw.at)}${tw.mods && tw.mods.length ? ` · aduse de pe server: ${esc(tw.mods.join(', '))}` : ''} · <a href="#" data-act="twoWay">verifică acum</a>`;
+    : tw.error ? `<span style="color:var(--red)">${L('Configurări', 'Configs')}: ${esc(tw.error)}</span>`
+      : L(`Configurări ${tw.push || tw.pull ? `sincronizate (↑ ${tw.push} trimise, ↓ ${tw.pull} aduse)` : 'la zi'}`, `Configs ${tw.push || tw.pull ? `synced (↑ ${tw.push} sent, ↓ ${tw.pull} pulled)` : 'up to date'}`) + ` · ${ago(tw.at)}${tw.mods && tw.mods.length ? L(` · aduse de pe server: ${esc(tw.mods.join(', '))}`, ` · brought from the server: ${esc(tw.mods.join(', '))}`) : ''} · <a href="#" data-act="twoWay">${L('verifică acum', 'check now')}</a>`;
 
   const side = $('#side-sync'), dot = side.querySelector('.dot');
   dot.className = `dot ${j ? 'busy' : !auto ? '' : ring === 'ok' ? 'ok' : ring === 'wait' ? 'warn' : ring === 'err' ? 'err' : 'busy'}`;
@@ -153,9 +155,9 @@ function renderMods() {
   $$('#mod-filters .chip').forEach(c => { c.querySelector('b').textContent = counts[c.dataset.f]; c.classList.toggle('active', c.dataset.f === S.filter); });
   const nu = $('#nav-updates'); nu.hidden = !counts.updates; nu.textContent = counts.updates;
   const own = S.profile.source === 'bifrost';
-  $('#mods-sub').textContent = `${own ? 'Profilul Bifrost' : `Profilul Thunderstore „${S.profile.profile || 'Default'}”`} · ${mods.length} moduri · ${counts.server} pe server`;
+  $('#mods-sub').textContent = L(`${own ? 'Profilul Bifrost' : `Profilul Thunderstore „${S.profile.profile || 'Default'}”`} · ${mods.length} moduri · ${counts.server} pe server`, `${own ? 'Bifrost profile' : `Thunderstore profile "${S.profile.profile || 'Default'}"`} · ${mods.length} ${mods.length === 1 ? 'mod' : 'mods'} · ${counts.server} on the server`);
   $('#btn-update-all').hidden = !own || !counts.updates;
-  $('#btn-update-all').textContent = `Actualizează tot (${counts.updates})`;
+  $('#btn-update-all').textContent = L(`Actualizează tot (${counts.updates})`, `Update all (${counts.updates})`);
 
   const list = mods.filter(m => {
     const sd = modSide(m);
@@ -167,14 +169,14 @@ function renderMods() {
     return true;
   }).sort((a, b) => (hasUpdate(b) - hasUpdate(a)) || (a.displayName || a.name).localeCompare(b.displayName || b.name));
 
-  if (!S.profile.profileFound) { $('#mod-list').innerHTML = `<div class="empty card">Nu găsesc profilul Thunderstore „${esc(S.profile.profile)}”.</div>`; return; }
+  if (!S.profile.profileFound) { $('#mod-list').innerHTML = `<div class="empty card">${L(`Nu găsesc profilul Thunderstore „${esc(S.profile.profile)}”.`, `The Thunderstore profile "${esc(S.profile.profile)}" is not found.`)}</div>`; return; }
   if (!list.length) { $('#mod-list').innerHTML = '<div class="empty">Niciun mod aici.</div>'; return; }
   const busy = !!S.job;
   $('#mod-list').innerHTML = list.map(m => {
     const sd = modSide(m), u = S.updates[m.name];
     const icon = m.icon ? `<img class="mod-icon" src="${esc(m.icon)}" alt="" loading="lazy">` : `<div class="mod-icon">${esc((m.displayName || '?')[0])}</div>`;
     const badges = [
-      hasUpdate(m) ? (S.installing[m.name] ? `<span class="badge pending">${S.installing[m.name].queued ? 'în coadă' : 'se actualizează...'}</span>` : `<button class="badge update" data-update="${esc(m.name)}" data-ver="${esc(u.latest)}" title="Actualizează prin Thunderstore Mod Manager">update ${esc(u.latest)} ↻</button>`) : '',
+      hasUpdate(m) ? (S.installing[m.name] ? `<span class="badge pending">${S.installing[m.name].queued ? 'în coadă' : 'se actualizează...'}</span>` : `<button class="badge update" data-update="${esc(m.name)}" data-ver="${esc(u.latest)}" title="${L('Actualizează la ultima versiune', 'Update to the latest version')}">update ${esc(u.latest)} ↻</button>`) : '',
       !m.enabled ? '<span class="badge off">dezactivat</span>' : '',
       m.manual ? (m.nexus ? `<button class="badge onsrv" data-nexus="${esc(m.name)}" title="Prietenii îl iau de pe Nexus (${esc(m.nexus.title)} ${esc(m.nexus.version || '')})">nexus ${esc(m.nexus.modId)}</button>`
         : `<button class="badge off" data-nexus="${esc(m.name)}" title="Leagă-l de pagina lui de pe Nexus ca prietenii să-l poată instala">manual · leagă de Nexus</button>`) : '',
@@ -198,15 +200,15 @@ function renderMods() {
       </div>
       <div class="mod-actions">${m.configs ? `<button class="icon-btn" data-config="${esc(m.name)}" data-title="${esc(m.displayName)}" title="Configurare (${m.configs} ${m.configs === 1 ? 'fișier' : 'fișiere'})">${GEAR}</button>` : ''}${seg}${uninstall}</div>
     </div>`;
-  }).join('') + (S.profile.otherConfigs ? `<div class="mod-other"><button class="btn ghost small" data-config="" data-title="Alte configurări">${GEAR} Alte configurări (${S.profile.otherConfigs} fără un mod recunoscut)</button></div>` : '');
+  }).join('') + (S.profile.otherConfigs ? `<div class="mod-other"><button class="btn ghost small" data-config="" data-title="Alte configurări">${GEAR} ${L(`Alte configurări (${S.profile.otherConfigs} fără un mod recunoscut)`, `Other configs (${S.profile.otherConfigs} without a known mod)`)}</button></div>` : '');
 }
 $('#mod-list').addEventListener('click', async e => {
   const cf = e.target.closest('[data-config]'); if (cf) { openConfigDrawer(cf.dataset.config, cf.dataset.title); return; }
   const up = e.target.closest('[data-update]'); if (up) { installPkg(up.dataset.update, up.dataset.ver); return; }
   const un = e.target.closest('[data-uninstall]');
   if (un) {
-    if (!await confirmBox('Dezinstalezi?', `${un.dataset.uninstall}\nDacă e mod de server, îl scot și de pe server (la următorul restart) și din lista prietenilor.`, 'Dezinstalează')) return;
-    if (S.job || S.queue?.length) toast(`${un.dataset.uninstall}: în coadă - se dezinstalează după ce termin ce fac acum.`, 'info');
+    if (!await confirmBox(L('Dezinstalezi?', 'Uninstall?'), un.dataset.uninstall + L('\nDacă e mod de server, îl scot și de pe server (la următorul restart) și din lista prietenilor.', '\nIf it is a server mod, it is also removed from the server (at the next restart) and from the friends\' list.'), L('Dezinstalează', 'Uninstall'))) return;
+    if (S.job || S.queue?.length) toast(L(`${un.dataset.uninstall}: în coadă - se dezinstalează după ce termin ce fac acum.`, `${un.dataset.uninstall}: queued - uninstalled after the current job.`), 'info');
     const r = await window.vp.act('remove', un.dataset.uninstall);
     toast(r.ok ? (S.settings.autoSync ? 'Dezinstalat - serverul se sincronizează după ce termin tot ce e în coadă.' : 'Dezinstalat. Apasă „Sincronizează acum” când ai terminat.') : r.error, r.ok ? 'ok' : 'error');
     return;
@@ -214,10 +216,10 @@ $('#mod-list').addEventListener('click', async e => {
   const nx = e.target.closest('[data-nexus]');
   if (nx) {
     const m = (S.profile.mods || []).find(x => x.name === nx.dataset.nexus);
-    const url = await confirmBox(`${nx.dataset.nexus} pe Nexus`, 'Lipește linkul paginii modului de pe Nexus (ex. https://www.nexusmods.com/valheim/mods/1234). Bifrost ia fișierul principal, cel mai nou. Gol = scoate legătura.', 'Salvează', m?.nexus ? `https://www.nexusmods.com/valheim/mods/${m.nexus.modId}` : '');
+    const url = await confirmBox(L(`${nx.dataset.nexus} pe Nexus`, `${nx.dataset.nexus} on Nexus`), L('Lipește linkul paginii modului de pe Nexus (ex. https://www.nexusmods.com/valheim/mods/1234). Bifrost ia fișierul principal, cel mai nou. Gol = scoate legătura.', 'Paste the link of the mod\'s Nexus page (e.g. https://www.nexusmods.com/valheim/mods/1234). Bifrost takes the newest main file. Empty = remove the link.'), L('Salvează', 'Save'), m?.nexus ? `https://www.nexusmods.com/valheim/mods/${m.nexus.modId}` : '');
     if (url === null) return;
     const r = await window.vp.act('nexusLink', { name: nx.dataset.nexus, url });
-    toast(r.ok ? (r.link ? `Legat de „${r.link.title}” ${r.link.version || ''} (fișierul ${r.link.fileName}).` : 'Legătură scoasă.') : r.error, r.ok ? 'ok' : 'error');
+    toast(r.ok ? (r.link ? L(`Legat de „${r.link.title}” ${r.link.version || ''} (fișierul ${r.link.fileName}).`, `Linked to "${r.link.title}" ${r.link.version || ''} (file ${r.link.fileName}).`) : L('Legătură scoasă.', 'Link removed.')) : r.error, r.ok ? 'ok' : 'error');
     return;
   }
   const a = e.target.closest('a[data-url]'); if (a) { window.vp.act('open', a.dataset.url); return; }
@@ -233,7 +235,7 @@ $$('#mod-filters .chip').forEach(c => c.onclick = () => { S.filter = c.dataset.f
 // ---------- modpack ----------
 function renderModpack() {
   const p = S.modpack || {};
-  if (p.name) $('#mp-sub').textContent = `${p.name} pe Thunderstore: pentru cine folosește un mod manager (prietenii cu Bifrost nu au nevoie de el).`;
+  if (p.name) $('#mp-sub').textContent = L(`${p.name} pe Thunderstore: pentru cine folosește un mod manager (prietenii cu Bifrost nu au nevoie de el).`, `${p.name} on Thunderstore: for people using a mod manager (friends with Bifrost don't need it).`);
   $('#mp-published').textContent = p.published || '–';
   $('#mp-local').textContent = p.local || '–';
   $('#mp-count').textContent = p.count ?? '–';
@@ -241,7 +243,7 @@ function renderModpack() {
   const n = (p.added?.length || 0) + (p.changed?.length || 0) + (p.removed?.length || 0);
   const pill = $('#mp-pill');
   pill.className = `status-pill ${n ? 'warn' : 'ok'}`;
-  $('#mp-pill-text').textContent = n ? `${n} schimbări nepublicate` : 'la zi';
+  $('#mp-pill-text').textContent = n ? L(`${n} schimbări nepublicate`, `${n} unpublished ${n === 1 ? 'change' : 'changes'}`) : L('la zi', 'up to date');
   const nm = $('#nav-modpack'); nm.hidden = !n; nm.textContent = n;
   const rows = [
     ...(p.changed || []).map(x => `<div class="diff-row chg"><span class="sym">↑</span><span>${esc(x.name)}</span><code>${esc(x.from)} → ${esc(x.to)}</code></div>`),
@@ -275,11 +277,11 @@ function renderMiniLog() {
 // ---------- settings ----------
 function renderSettingsGame() {
   const g = S.player?.game;
-  if (g) $('#game-detected').textContent = g.game ? `Acum: ${g.game}` : 'Nu l-am găsit prin Steam - scrie aici folderul care conține valheim.exe.';
+  if (g) $('#game-detected').textContent = g.game ? L(`Acum: ${g.game}`, `Now: ${g.game}`) : L('Nu l-am găsit prin Steam - scrie aici folderul care conține valheim.exe.', 'Not found through Steam - type the folder that contains valheim.exe here.');
   if (g) {
     $('#btn-restore-loader').disabled = !g.backup;
-    const who = { bifrost: 'Acum încarcă modurile Bifrost.', tmm: 'Acum încarcă modurile Thunderstore Mod Manager / r2modman - la JOACĂ preia Bifrost (păstrez un backup).', other: 'Acum e alt încărcător BepInEx - la JOACĂ preia Bifrost (păstrez un backup).', none: 'Valheim e fără moduri acum.', native: 'Linux: Bifrost pornește Valheim direct cu BepInEx-ul din profil, folderul jocului rămâne neatins.' }[g.owner];
-    if (who) $('#loader-state').textContent = who + (g.backup ? ' Backup-ul anterior există.' : '');
+    const who = { bifrost: L('Acum încarcă modurile Bifrost.', 'Bifrost loads the mods now.'), tmm: L('Acum încarcă modurile Thunderstore Mod Manager / r2modman - la JOACĂ preia Bifrost (păstrez un backup).', 'Thunderstore Mod Manager / r2modman loads the mods now - PLAY makes Bifrost take over (a backup is kept).'), other: L('Acum e alt încărcător BepInEx - la JOACĂ preia Bifrost (păstrez un backup).', 'Another BepInEx loader is in place - PLAY makes Bifrost take over (a backup is kept).'), none: L('Valheim e fără moduri acum.', 'Valheim has no mods right now.'), native: L('Linux: Bifrost pornește Valheim direct cu BepInEx-ul din profil, folderul jocului rămâne neatins.', 'Linux: Bifrost starts Valheim directly with the profile\'s BepInEx; the game folder stays untouched.') }[g.owner];
+    if (who) $('#loader-state').textContent = who + (g.backup ? L(' Backup-ul anterior există.', ' The previous backup exists.') : '');
   }
 }
 function renderSettings() {
@@ -293,7 +295,7 @@ function renderSettings() {
   // direct join: what PLAY will connect to
   if ($('#dj-state')) {
     $('#dj-state').textContent = !s.directJoin ? 'Oprit: intri din joc, cu join code-ul.'
-      : s.joinTarget ? `Acum: ${s.joinTarget}${s.hasJoinPass ? ' cu parola salvată' : ''}. Alegi caracterul, apeși Start și ești pe server.`
+      : s.joinTarget ? L(`Acum: ${s.joinTarget}${s.hasJoinPass ? ' cu parola salvată' : ''}. Alegi caracterul, apeși Start și ești pe server.`, `Now: ${s.joinTarget}${s.hasJoinPass ? ' with the saved password' : ''}. Pick the character, press Start and you are on the server.`)
         : s.isAdmin ? 'Încă nu știu IP-ul public al serverului (apare după ce pornește) - sau scrie adresa mai jos.'
           : 'Lista serverului nu are IP-ul: scrie adresa mai jos (o ai de la admin) sau adminul bifează „Pune și IP-ul în listă”.';
     // (attributes set from code are not seen by the translator)
@@ -313,13 +315,13 @@ $('#btn-nexus').onclick = async () => {
   $('#btn-nexus').disabled = true;
   const r = await window.vp.act('setNexusKey', v); $('#btn-nexus').disabled = false;
   if (r.ok) $('#nexus-input').value = '';
-  toast(r.ok ? `Conectat la Nexus ca ${r.user.name}${r.user.premium ? ' (Premium)' : ''}.` : `Cheia nu merge: ${r.error}`, r.ok ? 'ok' : 'error');
+  toast(r.ok ? L(`Conectat la Nexus ca ${r.user.name}${r.user.premium ? ' (Premium)' : ''}.`, `Connected to Nexus as ${r.user.name}${r.user.premium ? ' (Premium)' : ''}.`) : L(`Cheia nu merge: ${r.error}`, `The key does not work: ${r.error}`), r.ok ? 'ok' : 'error');
 };
 // download cache: size shown on the Settings page, "Empty" deletes it (mods get downloaded again when needed)
 const fmtSize = b => b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : `${Math.round(b / 1048576)} MB`;
 async function renderCache() {
   const r = await window.vp.act('cacheInfo');
-  if (r.ok) $('#cache-state').textContent = `${fmtSize(r.bytes)} în ${r.files} fișiere. Versiunile vechi se șterg singure; „Golește” le scoate pe toate (se descarcă din nou la nevoie).`;
+  if (r.ok) $('#cache-state').textContent = L(`${fmtSize(r.bytes)} în ${r.files} fișiere. Versiunile vechi se șterg singure; „Golește” le scoate pe toate (se descarcă din nou la nevoie).`, `${fmtSize(r.bytes)} in ${r.files} ${r.files === 1 ? 'file' : 'files'}. Old versions are removed by themselves; "Empty" removes them all (downloaded again when needed).`);
 }
 $('#btn-cache-clear').onclick = async () => {
   if (!await confirmBox('Golești cache-ul?', 'Modurile instalate rămân. Doar fișierele descărcate se șterg - la o reinstalare se descarcă din nou.', 'Golește')) return;
@@ -364,7 +366,7 @@ document.addEventListener('click', async e => {
   if (b.dataset.argId) arg = $('#' + b.dataset.argId).dataset.url;
   if (act === 'restart') {
     const p = S.status.players;
-    const ok = await confirmBox('Restart server?', p ? `Sunt ${p} jucători online - vor fi deconectați.\nServerul revine în ~2-3 minute, cu join code.` : 'Serverul revine în ~2-3 minute, cu join code.', 'Restart');
+    const ok = await confirmBox('Restart server?', p ? L(`Sunt ${p} jucători online - vor fi deconectați.\nServerul revine în ~2-3 minute, cu join code.`, `${p} ${p === 1 ? 'player is' : 'players are'} online - they will be disconnected.\nThe server is back in ~2-3 minutes, with a join code.`) : L('Serverul revine în ~2-3 minute, cu join code.', 'The server is back in ~2-3 minutes, with a join code.'), 'Restart');
     if (!ok) return;
   }
   if (act === 'fixcode') {
@@ -372,7 +374,7 @@ document.addEventListener('click', async e => {
   }
   if (act === 'publishModpack') {
     const p = S.modpack;
-    if (!await confirmBox('Publici modpack-ul?', `Construiesc o versiune nouă din profilul tău și o urc pe Thunderstore ca ${p.name}.\nAcum publicat: ${p.published || '?'}.`, 'Publică')) return;
+    if (!await confirmBox(L('Publici modpack-ul?', 'Publish the modpack?'), L(`Construiesc o versiune nouă din profilul tău și o urc pe Thunderstore ca ${p.name}.\nAcum publicat: ${p.published || '?'}.`, `A new version is built from your profile and uploaded to Thunderstore as ${p.name}.\nPublished now: ${p.published || '?'}.`), L('Publică', 'Publish'))) return;
   }
   if (act === 'importTmm' && !await confirmBox('Import din Thunderstore Mod Manager?', 'Copiez în profilul Bifrost aceleași moduri și versiuni (din cache-ul Thunderstore), configurările din BepInEx/config și modurile manuale. Profilul TMM rămâne neatins. Serverul nu se schimbă - fișierele sunt identice.', 'Importă')) return;
   if (act === 'updateAll' && !await confirmBox('Actualizezi tot?', 'Aduc ultima versiune pentru fiecare mod cu update. Serverul se actualizează singur (repornește când e gol) și prietenii primesc versiunile noi la JOACĂ.', 'Actualizează')) return;
@@ -380,7 +382,7 @@ document.addEventListener('click', async e => {
   if (act === 'dryrun') $('#dry-result').hidden = true;
   if (act === 'checkUpdates') { b.disabled = true; b.textContent = 'Caut...'; }
   const r = await window.vp.act(act, arg);
-  if (act === 'checkUpdates') { b.disabled = false; b.textContent = 'Caută update-uri'; const n = (S.profile.mods || []).filter(hasUpdate).length; toast(n ? `${n} moduri au update în Thunderstore.` : 'Toate modurile sunt la ultima versiune.', 'ok'); return; }
+  if (act === 'checkUpdates') { b.disabled = false; b.textContent = 'Caută update-uri'; const n = (S.profile.mods || []).filter(hasUpdate).length; toast(n ? L(`${n} moduri au update în Thunderstore.`, `${n} ${n === 1 ? 'mod has an update' : 'mods have updates'} on Thunderstore.`) : L('Toate modurile sunt la ultima versiune.', 'All mods are on the latest version.'), 'ok'); return; }
   if (act === 'dryrun' && r.ok) { const d = $('#dry-result'); d.hidden = false; d.innerHTML = `De copiat: <b>${esc(r.toCopy || '-')}</b><br>De scos: <b>${esc(r.toRemove || '-')}</b>`; return; }
   if (r && r.ok === false && r.error) toast(r.error, 'error');
   else if (act === 'restart' && r.ok) toast(r.manualRestart ? 'Bifrost nu poate reporni serverul ăsta - repornește-l din panoul hostului.' : r.postponed ? 'Sunt jucători online - serverul repornește când se golește.' : r.joinCode ? `Server repornit. Join code: ${r.joinCode}` : 'Server repornit.', r.manualRestart ? 'info' : 'ok');
@@ -391,8 +393,8 @@ document.addEventListener('click', async e => {
   else if (act === 'updateMods' && r.ok) toast('Modurile sunt la zi.', 'ok');
   else if (act === 'play' && r.ok) toast('Pornesc Valheim prin Steam...', 'ok');
   else if (act === 'refreshList' && r.ok) toast('Lista serverului e actualizată.', 'ok');
-  else if (act === 'importTmm' && r.ok) toast(`Import gata: ${r.count} pachete în profilul Bifrost. De acum pornește Valheim cu JOACĂ.`, 'ok');
-  else if (act === 'updateAll' && r.ok) toast(r.count ? `${r.count} moduri actualizate - sincronizez serverul.` : 'Totul e la zi.', 'ok');
+  else if (act === 'importTmm' && r.ok) toast(L(`Import gata: ${r.count} pachete în profilul Bifrost. De acum pornește Valheim cu JOACĂ.`, `Import done: ${r.count} packages in the Bifrost profile. From now on start Valheim with PLAY.`), 'ok');
+  else if (act === 'updateAll' && r.ok) toast(r.count ? L(`${r.count} moduri actualizate - sincronizez serverul.`, `${r.count} ${r.count === 1 ? 'mod' : 'mods'} updated - syncing the server.`) : L('Totul e la zi.', 'Everything is up to date.'), 'ok');
   else if (act === 'restoreLoader' && r.ok) toast('Încărcătorul anterior e pus înapoi. Valheim pornit din Steam folosește iar vechiul mod manager.', 'ok');
 });
 $('#btn-copy-code').onclick = async () => { if (!S.status.joinCode) return; await window.vp.act('copy', S.status.joinCode); toast(`Join code copiat: ${S.status.joinCode}`, 'ok'); };
@@ -471,7 +473,7 @@ function buildCats() {
 function renderBrowseSub() {
   const n = S.catalog ? S.catalog.filter(p => !isPack(p)).length : 0;
   $('#br-sub').textContent = S.catalog
-    ? `Catalogul Thunderstore pentru Valheim · ${n.toLocaleString(LOC())} moduri · actualizat ${ago(S.catalogFetched)}${S.catalogBusy ? ' · se reîmprospătează...' : ''}`
+    ? L(`Catalogul Thunderstore pentru Valheim · ${n.toLocaleString(LOC())} moduri · actualizat ${ago(S.catalogFetched)}${S.catalogBusy ? ' · se reîmprospătează...' : ''}`, `The Thunderstore catalog for Valheim · ${n.toLocaleString(LOC())} mods · updated ${ago(S.catalogFetched)}${S.catalogBusy ? ' · refreshing...' : ''}`)
     : 'Catalogul Thunderstore pentru Valheim';
 }
 function browseList() {
@@ -499,7 +501,7 @@ function renderBrowse(reset) {
       <div><div class="pk-name">${esc(pkTitle(p))}</div><div class="pk-owner">de ${esc(p.owner)}</div><div class="pk-desc">${esc(p.desc)}</div></div>
       <div class="pk-foot"><span class="pk-stat" title="descărcări">${ICON_DL}${fmtNum(p.dl)}</span><span class="pk-stat" title="aprecieri">${ICON_STAR}${fmtNum(p.rating)}</span>${sideTags(p)}${pkButton(p)}</div>
     </div>`).join('');
-  $('#br-more').textContent = !list.length ? 'Nimic găsit.' : list.length > shown.length ? `${shown.length} din ${list.length.toLocaleString(LOC())} - derulează pentru mai multe` : `${list.length} moduri`;
+  $('#br-more').textContent = !list.length ? 'Nimic găsit.' : list.length > shown.length ? L(`${shown.length} din ${list.length.toLocaleString(LOC())} - derulează pentru mai multe`, `${shown.length} of ${list.length.toLocaleString(LOC())} - scroll for more`) : L(`${list.length} moduri`, `${list.length} ${list.length === 1 ? 'mod' : 'mods'}`);
 }
 const moreObs = new IntersectionObserver(es => {
   if (es.some(e => e.isIntersecting) && S.catalog && $('#page-browse').classList.contains('active')) {
@@ -528,8 +530,8 @@ function setSource(src) {
   note.hidden = src !== 'nx';
   const u = S.settings.nexusUser;
   note.innerHTML = '<span>' + (!S.settings.hasNexusKey ? 'Pentru instalare de pe Nexus pune-ți cheia în <a href="#" data-page-link="settings">Setări → Nexus Mods</a>. Căutarea merge și fără.'
-    : u && u.premium ? `Conectat ca <b>${esc(u.name)}</b> (Premium): <b>Instalează</b> descarcă direct.`
-      : `Conectat ca <b>${esc(u ? u.name : '?')}</b> (cont gratuit): <b>Instalează</b> deschide pagina fișierului pe Nexus - apasă acolo <b>„Slow download”</b> și Bifrost îl instalează singur.${S.settings.isAdmin ? ' Modul intră în profilul tău Thunderstore ca mod manual, legat de Nexus, deci ajunge și în lista prietenilor.' : ''}`) + '</span>';
+    : u && u.premium ? L(`Conectat ca <b>${esc(u.name)}</b> (Premium): <b>Instalează</b> descarcă direct.`, `Connected as <b>${esc(u.name)}</b> (Premium): <b>Install</b> downloads directly.`)
+      : L(`Conectat ca <b>${esc(u ? u.name : '?')}</b> (cont gratuit): <b>Instalează</b> deschide pagina fișierului pe Nexus - apasă acolo <b>„Slow download”</b> și Bifrost îl instalează singur.${S.settings.isAdmin ? ' Modul intră în profilul tău ca mod manual, legat de Nexus, deci ajunge și în lista prietenilor.' : ''}`, `Connected as <b>${esc(u ? u.name : '?')}</b> (free account): <b>Install</b> opens the file's page on Nexus - press <b>"Slow download"</b> there and Bifrost installs it by itself.${S.settings.isAdmin ? ' The mod goes into your profile as a manual mod linked to Nexus, so it reaches the friends\' list too.' : ''}`)) + '</span>';
   renderHowto();
   renderBrowse(true);
 }
@@ -542,7 +544,7 @@ async function nexusSearch(reset) {
   if (seq !== nx.seq) return;
   nx.loading = false;
   if (inst) { nx.installed = inst.installed; nx.pending = inst.pending; }
-  if (!r.ok) { nx.error = r.error; $('#br-more').textContent = `Nexus nu răspunde: ${r.error}`; if (reset) $('#br-grid').innerHTML = ''; return; }
+  if (!r.ok) { nx.error = r.error; $('#br-more').textContent = L(`Nexus nu răspunde: ${r.error}`, `Nexus does not answer: ${r.error}`); if (reset) $('#br-grid').innerHTML = ''; return; }
   nx.error = null; nx.total = r.total; nx.list.push(...r.mods);
   renderNexus();
 }
@@ -557,7 +559,7 @@ function nxButton(m, big) {
 }
 function renderNexus() {
   const nx = S.nx;
-  $('#br-sub').textContent = `Nexus Mods pentru Valheim · ${nx.total.toLocaleString(LOC())} moduri`;
+  $('#br-sub').textContent = L(`Nexus Mods pentru Valheim · ${nx.total.toLocaleString(LOC())} moduri`, `Nexus Mods for Valheim · ${nx.total.toLocaleString(LOC())} mods`);
   $('#br-grid').innerHTML = nx.list.map(m => `
     <div class="pk" data-nxpk="${m.modId}">
       ${m.thumbnailUrl ? `<img src="${esc(m.thumbnailUrl)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
@@ -610,20 +612,20 @@ function renderHowto() {
   const en = (S.settings.lang || 'en') === 'en', admin = S.settings.isAdmin;
   h.querySelector('span').innerHTML = en
     ? `<b>How to install:</b> press <b>Install</b> and Bifrost puts the mod (with its dependencies) into this server's profile. ${admin ? 'Server mods go to the server too, and your friends get them through the list.' : 'The mods the server needs are not searched here - they install by themselves when you press <b>PLAY</b>.'}`
-    : `<b>Cum se instalează:</b> apeși <b>Instalează</b> și Bifrost pune modul (cu dependențele) în profilul serverului. ${admin ? 'Modurile de server ajung și pe server, iar prietenii le primesc prin listă.' : 'Modurile cerute de server nu trebuie căutate aici - se instalează singure când apeși <b>JOACĂ</b>.'}`;
+    : L(`<b>Cum se instalează:</b> apeși <b>Instalează</b> și Bifrost pune modul (cu dependențele) în profilul serverului. ${admin ? 'Modurile de server ajung și pe server, iar prietenii le primesc prin listă.' : 'Modurile cerute de server nu trebuie căutate aici - se instalează singure când apeși <b>JOACĂ</b>.'}`, `<b>How to install:</b> press <b>Install</b> and Bifrost puts the mod (with its dependencies) into this server's profile. ${admin ? 'Server mods go to the server too, and your friends get them through the list.' : 'The mods the server needs don\'t have to be found here - they install by themselves when you press <b>PLAY</b>.'}`);
 }
 $('#br-howto-x').onclick = () => { $('#br-howto').hidden = true; try { localStorage.setItem('howtoSeen', '1'); } catch { } };
 
 async function installPkg(full, ver) {
   const p = S.catalog?.find(x => x.full === full);
-  const tmm = 'Se deschide Thunderstore Mod Manager și instalează modul în profilul tău (dacă cere, confirmă acolo).';
-  if (!S.settings.isAdmin) toast(`Instalez ${full}...`);
-  if (S.job || S.queue?.length) toast(`${full}: în coadă - se instalează după ce termin ce fac acum.`, 'info');
+  const tmm = L('Se deschide Thunderstore Mod Manager și instalează modul în profilul tău (dacă cere, confirmă acolo).', 'Thunderstore Mod Manager opens and installs the mod into your profile (confirm there if it asks).');
+  if (!S.settings.isAdmin) toast(L(`Instalez ${full}...`, `Installing ${full}...`));
+  if (S.job || S.queue?.length) toast(L(`${full}: în coadă - se instalează după ce termin ce fac acum.`, `${full}: queued - installed after the current job.`), 'info');
   const r = await window.vp.act('install', { full, ver: ver || p?.ver });
   if (!r.ok) { toast(r.error, 'error'); return; }
   if (r.already) return;
-  if (r.via === 'tmm') toast(`${full}: ${tmm}${r.side ? ` Marcat „${r.side}” după categoriile Thunderstore.` : ''}`, 'ok');
-  else toast(`${full} instalat. Pornește-l cu JOACĂ.`, 'ok');
+  if (r.via === 'tmm') toast(`${full}: ${tmm}${r.side ? L(` Marcat „${r.side}” după categoriile Thunderstore.`, ` Marked "${r.side}" from its Thunderstore categories.`) : ''}`, 'ok');
+  else toast(L(`${full} instalat. Pornește-l cu JOACĂ.`, `${full} installed. Start it with PLAY.`), 'ok');
 }
 $('#br-grid').addEventListener('click', e => {
   const b = e.target.closest('[data-install]'); if (b) { e.stopPropagation(); installPkg(b.dataset.install); return; }
@@ -879,7 +881,7 @@ function renderPlayer() {
   btn.classList.toggle('working', !!(S.job || starting));
   btn.classList.toggle('running', !!g.running && !starting);
   btn.textContent = g.running && !starting ? 'Valheim rulează' : starting ? (S.job?.kind === 'play' ? 'Se pregătește...' : 'Pornește...') : S.job ? 'Lucrez...' : 'JOACĂ';
-  $('#pl-play-note').textContent = !m ? '' : need ? `întâi: ${P.plan.install.length} de instalat${P.plan.remove.length ? `, ${P.plan.remove.length} de scos` : ''}${P.plan.bytes ? ` (~${fmtMB(P.plan.bytes)})` : ''}` : 'modurile sunt la zi';
+  $('#pl-play-note').textContent = !m ? '' : need ? L(`întâi: ${P.plan.install.length} de instalat${P.plan.remove.length ? `, ${P.plan.remove.length} de scos` : ''}`, `first: ${P.plan.install.length} to install${P.plan.remove.length ? `, ${P.plan.remove.length} to remove` : ''}`) + (P.plan.bytes ? ` (~${fmtMB(P.plan.bytes)})` : '') : L('modurile sunt la zi', 'mods are up to date');
 
   // mods summary
   const ring = $('#pl-ring');
@@ -994,7 +996,7 @@ function renderList() {
   pill.className = `status-pill ${l.busy ? 'busy' : l.ok === false || l.error ? 'warn' : l.ok ? 'ok' : ''}`;
   $('#list-pill-text').textContent = l.busy ? 'public...' : l.error ? 'nepublicată' : l.ok ? `publicată ${ago(l.at)}` : 'încă nepublicată';
   const srv = S.settings.server || {};
-  $('#list-sub').textContent = l.error || (srv.list ? `Prietenii deschid invitația în Bifrost și primesc exact modurile serverului${S.settings.autoPublish ? ' - lista se publică singură după fiecare sincronizare și la join code nou.' : '.'}`
+  $('#list-sub').textContent = l.error || (srv.list ? L(`Prietenii deschid invitația în Bifrost și primesc exact modurile serverului${S.settings.autoPublish ? ' - lista se publică singură după fiecare sincronizare și la join code nou.' : '.'}`, `Friends open the invite in Bifrost and get exactly the server's mods${S.settings.autoPublish ? ' - the list publishes itself after every sync and on a new join code.' : '.'}`)
     : 'Lista se creează la prima publicare (un Gist privat pe contul tău GitHub) - apoi primești linkul de invitație.');
   $('#invite-box').hidden = !srv.list;
   if (srv.list) { $('#inv-link').textContent = srv.inviteLink; $('#inv-code').textContent = srv.invite; }
@@ -1002,7 +1004,7 @@ function renderList() {
 }
 const listUrl = l => !l ? null : l.kind === 'gist' ? `https://gist.github.com/${l.id}` : l.kind === 'github' ? `https://github.com/${l.repo}/blob/main/${l.path || 'server.json'}` : l.url;
 $('#btn-list-open').onclick = () => { const u = listUrl(S.settings.server?.list); if (u) window.vp.act('open', u); else toast('Lista nu e publicată încă.'); };
-const shareText = () => { const v = S.settings.server; return `Hai pe serverul nostru de Valheim „${v.name}”!\n1. Instalează Bifrost: https://github.com/FlorinCamarut1/bifrost/releases/latest\n2. Deschide invitația: ${v.inviteLink}\n   (sau în Bifrost: Adaugă server → codul ${v.invite})\n3. Apasă JOACĂ - modurile se instalează singure.`; };
+const shareText = () => { const v = S.settings.server; return L(`Hai pe serverul nostru de Valheim „${v.name}”!\n1. Instalează Bifrost: https://github.com/FlorinCamarut1/bifrost/releases/latest\n2. Deschide invitația: ${v.inviteLink}\n   (sau în Bifrost: Adaugă server → codul ${v.invite})\n3. Apasă JOACĂ - modurile se instalează singure.`, `Join our Valheim server "${v.name}"!\n1. Install Bifrost: https://github.com/FlorinCamarut1/bifrost/releases/latest\n2. Open the invite: ${v.inviteLink}\n   (or in Bifrost: Add server → the code ${v.invite})\n3. Press PLAY - the mods install by themselves.`); };
 $('#btn-share-text').onclick = async () => { await window.vp.act('copy', shareText()); toast('Mesajul e copiat - lipește-l pe Discord.', 'ok'); };
 $('#btn-copy-invite').onclick = async () => { const v = S.settings.server; if (!v?.inviteLink) return toast('Serverul nu are încă o listă publicată.', 'error'); await window.vp.act('copy', shareText()); toast('Invitația e copiată.', 'ok'); };
 $('#btn-export-code').onclick = async () => {
@@ -1011,11 +1013,11 @@ $('#btn-export-code').onclick = async () => {
   const r = await window.vp.act('exportCode', { configs: withCfg });
   if (!r.ok) return toast(r.error, 'error');
   await window.vp.act('copy', r.code);
-  toast(`Cod copiat: ${r.code} - în r2modman / TMM: Import / update → From code.`, 'ok');
+  toast(L(`Cod copiat: ${r.code} - în r2modman / TMM: Import / update → From code.`, `Code copied: ${r.code} - in r2modman / TMM: Import / update → From code.`), 'ok');
 };
 $('#btn-remove-server').onclick = async () => {
   const v = S.settings.server; if (!v) return;
-  if (!await confirmBox(`Ștergi „${v.name}” din Bifrost?`, 'Profilul lui de moduri și setările lui dispar de pe PC-ul tău. Serverul în sine și lista publicată rămân neatinse.', 'Șterge')) return;
+  if (!await confirmBox(L(`Ștergi „${v.name}” din Bifrost?`, `Remove "${v.name}" from Bifrost?`), L('Profilul lui de moduri și setările lui dispar de pe PC-ul tău. Serverul în sine și lista publicată rămân neatinse.', 'Its mod profile and settings are removed from your PC. The server itself and the published list stay untouched.'), L('Șterge', 'Remove'))) return;
   const r = await window.vp.act('removeServer', v.id);
   if (!r.ok) toast(r.error, 'error');
 };
@@ -1034,7 +1036,7 @@ function renderServers() {
     const c = cur.conn;
     $('#set-conn').textContent = !c ? 'fără conexiune - doar lista' : c.type === 'ssh-docker' ? `${c.host}, Docker „${c.container}”` : c.type === 'ssh' ? `SSH ${c.host}: ${c.pluginsDir}` : c.type === 'local' ? `acest PC: ${c.pluginsDir}` : `FTP ${c.host}: ${c.pluginsDir}`;
     $('#set-invite').textContent = cur.inviteLink ? `${cur.invite}` : 'lista nu e publicată încă';
-    $('#set-srv-title').textContent = `Serverul acesta: ${cur.name}`;
+    $('#set-srv-title').textContent = L(`Serverul acesta: ${cur.name}`, `This server: ${cur.name}`);
   }
   const gh = $('#gh-state');
   if (gh) gh.innerHTML = st.githubUser ? `<span style="color:var(--green)">✓ Conectat ca <b>${esc(st.githubUser)}</b></span> - lista e un Gist privat pe contul tău.` : 'Pentru publicarea listei (un Gist privat pe contul tău). Merge și GitHub CLI (<code>gh</code>), dacă e logat.';
@@ -1053,7 +1055,7 @@ $('#srv-menu').addEventListener('click', async e => {
 async function joinServer(code) {
   toast('Citesc lista serverului...');
   const r = await window.vp.act('addServer', code);
-  toast(r.ok ? (r.existed ? 'Serverul era deja adăugat - l-am deschis.' : `Server adăugat: ${r.name} (${r.required} moduri). Apasă JOACĂ.`) : r.error, r.ok ? 'ok' : 'error');
+  toast(r.ok ? (r.existed ? L('Serverul era deja adăugat - l-am deschis.', 'The server was already added - it is open now.') : L(`Server adăugat: ${r.name} (${r.required} moduri). Apasă JOACĂ.`, `Server added: ${r.name} (${r.required} ${r.required === 1 ? 'mod' : 'mods'}). Press PLAY.`)) : r.error, r.ok ? 'ok' : 'error');
 }
 $('#wl-join').onclick = () => { const v = $('#wl-invite').value.trim(); if (v) joinServer(v); };
 $('#wl-invite').addEventListener('keydown', e => { if (e.key === 'Enter') $('#wl-join').click(); });
@@ -1079,7 +1081,7 @@ function openWizard(mode) {
   }
   wizType();
   window.vp.act('localProfiles').then(r => {
-    $('#wz-local').innerHTML = (r.profiles || []).map(p => `<option value="${esc(p.dir)}">${esc(p.manager)} - ${esc(p.name)} (${p.mods} moduri${p.manual ? `, ${p.manual} manuale` : ''})</option>`).join('') || '<option value="">(niciun profil găsit)</option>';
+    $('#wz-local').innerHTML = (r.profiles || []).map(p => `<option value="${esc(p.dir)}">${esc(p.manager)} - ${esc(p.name)} (${L(`${p.mods} moduri${p.manual ? `, ${p.manual} manuale` : ''}`, `${p.mods} mods${p.manual ? `, ${p.manual} manual` : ''}`)})</option>`).join('') || `<option value="">${L('(niciun profil găsit)', '(no profile found)')}</option>`;
   });
   w.hidden = false;
   setTimeout(() => $(mode === 'create' || mode === 'local' ? '#wz-name' : '#wz-type').focus(), 50);
@@ -1111,7 +1113,7 @@ $('#wz-test').onclick = async () => {
   $('#wz-test-res').textContent = 'testez...';
   const r = await window.vp.act('testConnection', { conn: c, secret: $('#wz-fpass').value || undefined });
   $('#wz-test-res').innerHTML = !r.ok ? `<span style="color:var(--red)">${esc(r.error)}</span>`
-    : `<span style="color:var(--green)">✓ conectat</span> · pluginuri: ${r.plugins ? `da${r.mods != null ? ` (${r.mods})` : ''}` : '<b>nu găsesc folderul</b>'} · configurări: ${r.config ? 'da' : '<b>nu găsesc folderul</b>'}`;
+    : L(`<span style="color:var(--green)">✓ conectat</span> · pluginuri: ${r.plugins ? `da${r.mods != null ? ` (${r.mods})` : ''}` : '<b>nu găsesc folderul</b>'} · configurări: ${r.config ? 'da' : '<b>nu găsesc folderul</b>'}`, `<span style="color:var(--green)">✓ connected</span> · plugins: ${r.plugins ? `yes${r.mods != null ? ` (${r.mods})` : ''}` : '<b>folder not found</b>'} · configs: ${r.config ? 'yes' : '<b>folder not found</b>'}`);
 };
 $('#wiz-cancel').onclick = () => { $('#wiz').hidden = true; };
 $('#wiz-ok').onclick = async () => {
@@ -1131,7 +1133,7 @@ $('#wiz-ok').onclick = async () => {
       if (!name) return toast('Dă-i un nume.', 'error');
       $('#wiz').hidden = true; toast(wizMode === 'create' ? 'Creez serverul și import modurile...' : 'Creez profilul...');
       const r = await window.vp.act('createServer', { name, world: $('#wz-world').value.trim(), conn: wizMode === 'create' ? conn : null, secret, source, personal: wizMode === 'local' });
-      toast(r.ok ? `Gata: ${r.count} pachete în profil.${wizMode === 'create' && conn ? ' Pun modurile pe server...' : ''}` : r.error, r.ok ? 'ok' : 'error');
+      toast(r.ok ? L(`Gata: ${r.count} pachete în profil.${wizMode === 'create' && conn ? ' Pun modurile pe server...' : ''}`, `Done: ${r.count} packages in the profile.${wizMode === 'create' && conn ? ' Putting the mods on the server...' : ''}`) : r.error, r.ok ? 'ok' : 'error');
     }
     $('#wiz').hidden = true;
   } finally { $('#wiz-ok').disabled = false; }
@@ -1143,7 +1145,7 @@ $('#btn-gh-login').onclick = async () => {
   const r = await window.vp.act('githubLogin');
   if (!r.ok) return toast(r.error, 'error');
   await window.vp.act('copy', r.code);
-  confirmBox('Conectare la GitHub', `S-a deschis ${r.uri}. Introdu codul ${r.code} (e deja copiat) și apasă Authorize. Bifrost află singur când ai terminat.`, 'OK');
+  confirmBox(L('Conectare la GitHub', 'Connect to GitHub'), L(`S-a deschis ${r.uri}. Introdu codul ${r.code} (e deja copiat) și apasă Authorize. Bifrost află singur când ai terminat.`, `${r.uri} has opened. Enter the code ${r.code} (already copied) and press Authorize. Bifrost notices by itself when you are done.`), 'OK');
 };
 $('#btn-gh-token').onclick = async () => {
   const t = await confirmBox('Token GitHub', 'Un token „classic” cu permisiunea „gist” (github.com → Settings → Developer settings → Personal access tokens). E salvat criptat.', 'Salvează', '');
@@ -1158,17 +1160,17 @@ function renderAppUpdate() {
   const u = S.appUpdate, el = $('#app-update');
   // the Update card in Settings
   $('#upd-title').textContent = `Bifrost ${u?.current || S.settings.version || ''}`;
-  $('#upd-state').textContent = !u ? 'se verifică...' : u.error ? `nu am putut verifica: ${u.error}`
-    : u.ready ? `Versiunea ${u.version} e descărcată - repornește ca s-o folosești.`
-      : u.downloading ? `Se descarcă versiunea ${u.version}...`
-        : u.installer ? (u.source ? `Versiunea ${u.version} e disponibilă. Rulezi din sursă: ia varianta portabilă de pe GitHub ca să primești update-uri automate.` : `Versiunea ${u.version} are nevoie de installer-ul nou.`)
+  $('#upd-state').textContent = !u ? L('se verifică...', 'checking...') : u.error ? L(`nu am putut verifica: ${u.error}`, `could not check: ${u.error}`)
+    : u.ready ? L(`Versiunea ${u.version} e descărcată - repornește ca s-o folosești.`, `Version ${u.version} is downloaded - restart to use it.`)
+      : u.downloading ? L(`Se descarcă versiunea ${u.version}...`, `Downloading version ${u.version}...`)
+        : u.installer ? (u.source ? L(`Versiunea ${u.version} e disponibilă. Rulezi din sursă: ia varianta portabilă de pe GitHub ca să primești update-uri automate.`, `Version ${u.version} is available. You run from source: get the portable build from GitHub to receive automatic updates.`) : L(`Versiunea ${u.version} are nevoie de installer-ul nou.`, `Version ${u.version} needs the new installer.`))
           : `Ai ultima versiune · verificat ${ago(u.checkedAt)}`;
   $('#btn-upd-go').hidden = !u?.ready;
   $('#btn-upd-dl').hidden = !u?.installer;
   if (!u || u.upToDate || u.error) { el.hidden = true; return; }
   el.hidden = false;
   el.innerHTML = u.installer ? `<b>Bifrost ${esc(u.version)}</b> e disponibil.<button class="btn small primary" id="btn-app-dl">Descarcă</button>`
-    : u.ready ? `<b>Bifrost ${esc(u.version)}</b> e gata.<button class="btn small primary" id="btn-app-update">Repornește și actualizează</button>` : `Se descarcă Bifrost ${esc(u.version)}...`;
+    : u.ready ? `<b>Bifrost ${esc(u.version)}</b> ${L('e gata.', 'is ready.')}<button class="btn small primary" id="btn-app-update">${L('Repornește și actualizează', 'Restart and update')}</button>` : L(`Se descarcă Bifrost ${esc(u.version)}...`, `Downloading Bifrost ${esc(u.version)}...`);
   const dl = $('#btn-app-dl'); if (dl) dl.onclick = () => window.vp.act('open', u.page);
   const b = $('#btn-app-update'); if (b) b.onclick = () => window.vp.installUpdate();
 }
