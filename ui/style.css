@@ -242,6 +242,7 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .1em; color: va
 .pk-stat svg { width: 13px; height: 13px; }
 .side-tag { font-size: 10.5px; padding: 1px 7px; border-radius: 6px; background: #ffffff0a; color: var(--muted); border: 1px solid var(--line2); }
 .side-tag.srv { color: var(--gold); border-color: #e6c47744; }
+.side-tag.dep { color: var(--amber); border-color: #f0a64b55; }
 .btn.installed { color: var(--green); border-color: #5fd09a44; background: #5fd09a0d; cursor: default; }
 .btn.update { color: var(--blue); border-color: #7fa8ff66; background: #7fa8ff12; }
 .btn.working { color: var(--gold2); cursor: default; }

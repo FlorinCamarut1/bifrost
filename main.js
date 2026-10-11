@@ -462,6 +462,7 @@ function setProgress(p) { progress = p; send('progress', progress); }
 // =====================================================================================================
 const CATALOG_FILE = path.join(DATA, 'catalog.json');
 let catalog = readJson(CATALOG_FILE, null);
+if (catalog && catalog.v !== 2) catalog.fetched = 0;   // cached before deprecated packages were kept: refresh
 let catalogIndex = new Map();
 let catalogBusy = null;
 let updates = {};

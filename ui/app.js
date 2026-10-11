@@ -455,7 +455,8 @@ function pkButton(p, big) {
 }
 function sideTags(p) {
   const c = p.cats || [];
-  return [c.includes('Server-side') ? '<span class="side-tag srv">server</span>' : '', c.includes('Client-side') ? '<span class="side-tag">client</span>' : ''].join('');
+  return [c.includes('Server-side') ? '<span class="side-tag srv">server</span>' : '', c.includes('Client-side') ? '<span class="side-tag">client</span>' : '',
+    p.deprecated ? '<span class="side-tag dep" title="Marked deprecated on Thunderstore - shown only when you search for it">deprecated</span>' : ''].join('');
 }
 
 async function loadCatalog(force) {
@@ -480,16 +481,16 @@ function buildCats() {
     cats.map(([c, n]) => `<button class="chip ${S.bcat === c ? 'active' : ''}" data-cat="${esc(c)}">${esc(c)} <b>${n}</b></button>`).join('');
 }
 function renderBrowseSub() {
-  const n = S.catalog ? S.catalog.filter(p => !isPack(p)).length : 0;
+  const n = S.catalog ? S.catalog.filter(p => !isPack(p) && !p.deprecated).length : 0;
   $('#br-sub').textContent = S.catalog
     ? L(`Catalogul Thunderstore pentru Valheim · ${n.toLocaleString(LOC())} moduri · actualizat ${ago(S.catalogFetched)}${S.catalogBusy ? ' · se reîmprospătează...' : ''}`, `The Thunderstore catalog for Valheim · ${n.toLocaleString(LOC())} mods · updated ${ago(S.catalogFetched)}${S.catalogBusy ? ' · refreshing...' : ''}`)
     : 'Catalogul Thunderstore pentru Valheim';
 }
 function browseList() {
   const q = S.bq.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  let list = S.catalog.filter(p => (S.bpacks || !isPack(p)) && (!S.bcat || (p.cats || []).includes(S.bcat)) && q.every(w => p.hay.includes(w)));
+  let list = S.catalog.filter(p => (S.bpacks || !isPack(p)) && (!S.bcat || (p.cats || []).includes(S.bcat)) && (!p.deprecated || q.length) && q.every(w => p.hay.includes(w)));
   const key = { dl: p => p.dl, rating: p => p.rating, updated: p => p.updated, created: p => p.created }[S.bsort];
-  list.sort((a, b) => key(b) - key(a));
+  list.sort((a, b) => !!a.deprecated - !!b.deprecated || key(b) - key(a));   // deprecated ones after the rest
   if (q.length) {   // exact name hits first
     const qs = q.join(' ');
     list.sort((a, b) => (pkTitle(b).toLowerCase() === qs) - (pkTitle(a).toLowerCase() === qs) || (pkTitle(b).toLowerCase().includes(qs)) - (pkTitle(a).toLowerCase().includes(qs)));
