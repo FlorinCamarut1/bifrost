@@ -211,6 +211,11 @@ $('#mod-list').addEventListener('click', async e => {
     if (S.job || S.queue?.length) toast(L(`${un.dataset.uninstall}: în coadă - se dezinstalează după ce termin ce fac acum.`, `${un.dataset.uninstall}: queued - uninstalled after the current job.`), 'info');
     const r = await window.vp.act('remove', un.dataset.uninstall);
     toast(r.ok ? (S.settings.autoSync ? 'Dezinstalat - serverul se sincronizează după ce termin tot ce e în coadă.' : 'Dezinstalat. Apasă „Sincronizează acum” când ai terminat.') : r.error, r.ok ? 'ok' : 'error');
+    if (r.ok && r.configs?.length && await confirmBox(L('Ștergi și configurările lui?', 'Delete its configs too?'),
+      L(`${r.configs.join(', ')}\nDacă le păstrezi, o reinstalare le găsește la loc. Șterse, dispar și de pe server.`, `${r.configs.join(', ')}\nKept, a reinstall finds them again. Deleted, they are gone from the server too.`), L('Șterge-le', 'Delete them'))) {
+      const d = await window.vp.act('deleteConfigs', r.configs);
+      toast(d.ok ? L(`${d.deleted} fișiere de config șterse${d.remote ? ' (și de pe server)' : ''}.`, `${d.deleted} config ${d.deleted === 1 ? 'file' : 'files'} deleted${d.remote ? ' (from the server too)' : ''}.`) : d.error, d.ok ? 'ok' : 'error');
+    }
     return;
   }
   const nx = e.target.closest('[data-nexus]');
@@ -290,8 +295,8 @@ function renderSettings() {
     if (document.activeElement === el) return;
     if (el.type === 'checkbox') el.checked = !!s[el.dataset.set]; else el.value = s[el.dataset.set] ?? '';
   });
-  $('#token-state').innerHTML = s.hasToken ? '<span style="color:var(--green)">✓ Token salvat.</span>' : '<span class="muted">Niciun token salvat.</span>';
-  $('#nexus-state').innerHTML = s.hasNexusKey && s.nexusUser ? `<span style="color:var(--green)">✓ Conectat ca <b>${esc(s.nexusUser.name)}</b> · ${s.nexusUser.premium ? 'Premium: descărcări automate' : 'cont gratuit: un click pe „Mod Manager Download” per fișier'}</span>` : '<span class="muted">Nicio cheie salvată.</span>';
+  $('#token-state').innerHTML = s.hasToken ? `<span style="color:var(--green)">${L('✓ Token salvat.', '✓ Token saved.')}</span>` : `<span class="muted">${L('Niciun token salvat.', 'No token saved.')}</span>`;
+  $('#nexus-state').innerHTML = s.hasNexusKey && s.nexusUser ? `<span style="color:var(--green)">${L(`✓ Conectat ca <b>${esc(s.nexusUser.name)}</b> · ${s.nexusUser.premium ? 'Premium: descărcări automate' : 'cont gratuit: un click pe „Slow download” per fișier'}`, `✓ Connected as <b>${esc(s.nexusUser.name)}</b> · ${s.nexusUser.premium ? 'Premium: automatic downloads' : 'free account: one click on "Slow download" per file'}`)}</span>` : '<span class="muted">Nicio cheie salvată.</span>';
   // direct join: what PLAY will connect to
   if ($('#dj-state')) {
     $('#dj-state').textContent = !s.directJoin ? 'Oprit: intri din joc, cu join code-ul.'
@@ -300,7 +305,7 @@ function renderSettings() {
           : 'Lista serverului nu are IP-ul: scrie adresa mai jos (o ai de la admin) sau adminul bifează „Pune și IP-ul în listă”.';
     // (attributes set from code are not seen by the translator)
     $('#dj-addr').placeholder = s.joinAddress ? '' : (s.joinTarget || ((s.lang || 'en') === 'en' ? window.bifrostI18n.t('automat') : 'automat'));
-    $('#jp-state').innerHTML = s.hasJoinPass ? '<span style="color:var(--green)">✓ Parolă salvată (criptat, doar pe PC-ul tău).</span>' : '<span class="muted">Nicio parolă salvată. Dacă serverul are parolă, scrie-o o dată aici.</span>';
+    $('#jp-state').innerHTML = s.hasJoinPass ? `<span style="color:var(--green)">${L('✓ Parolă salvată (criptat, doar pe PC-ul tău).', '✓ Password saved (encrypted, only on your PC).')}</span>` : `<span class="muted">${L('Nicio parolă salvată. Dacă serverul are parolă, scrie-o o dată aici.', 'No password saved. If the server has one, type it here once.')}</span>`;
     $('#btn-jp-clear').hidden = !s.hasJoinPass;
   }
   // restart / new join code only where Bifrost can do them
@@ -659,7 +664,7 @@ function drawerHead(p) {
     <div class="where">${where}</div>
     ${deps.length ? `<div class="dr-section"><h3>Dependențe (${deps.length}) - se instalează automat</h3>${deps.map(d => {
     const have = installedVer(d.full);
-    return `<div class="dep ${have ? 'have' : ''}"><span>${esc(d.full)}</span><span>${have ? `✓ ai ${esc(have)}` : `${esc(d.ver)}`}</span></div>`;
+    return `<div class="dep ${have ? 'have' : ''}"><span>${esc(d.full)}</span><span>${have ? L(`✓ ai ${esc(have)}`, `✓ you have ${esc(have)}`) : `${esc(d.ver)}`}</span></div>`;
   }).join('')}</div>` : ''}
     ${c.length ? `<div class="dr-section"><h3>Categorii</h3><div class="row gap wrap">${c.map(x => `<span class="tag">${esc(x)}</span>`).join('')}</div></div>` : ''}`;
 }
@@ -737,6 +742,7 @@ function renderConfig() {
   $('#drawer-body').innerHTML = `
     <div class="cfg-head"><h2>${esc(CFG.title)}</h2><div class="muted">${f?.parsed?.plugin ? `<span class="no-i18n">${esc(f.parsed.plugin)}</span> · ` : ''}<span>${dest}</span></div></div>
     ${files}
+    ${CFG.key === '' && CFG.rel ? `<div class="cfg-orphan"><span class="muted small">${L('Niciun mod instalat nu folosește fișierul ăsta (rămas de la un mod dezinstalat?).', 'No installed mod uses this file (left from an uninstalled mod?).')}</span><button class="btn small danger" id="cfg-delete">${L('Șterge fișierul', 'Delete the file')}</button></div>` : ''}
     <div class="cfg-tools">${f?.parsed && !CFG.raw ? `<input class="txt" id="cfg-q" placeholder="Caută o setare..." value="${esc(CFG.q)}">` : `<span class="muted small no-i18n">${esc(CFG.rel || '')}</span>`}
       ${f?.parsed ? `<div class="seg" id="cfg-mode"><button class="${CFG.raw ? '' : 'on server'}" data-mode="form">Setări</button><button class="${CFG.raw ? 'on server' : ''}" data-mode="raw">Text</button></div>` : ''}</div>
     <div id="cfg-body">${body}</div>
@@ -834,6 +840,14 @@ $('#drawer-body').addEventListener('click', async e => {
   }
   if (e.target.closest('#cfg-discard')) { Object.assign(CFG, { rawText: null, changes: new Map() }); renderConfig(); return; }
   if (e.target.closest('#cfg-save')) { saveConfig(); return; }
+  if (e.target.closest('#cfg-delete')) {
+    const rel = CFG.rel;
+    if (!await confirmBox(L('Ștergi fișierul?', 'Delete the file?'), L(`${rel}\nDispare din profil și de pe server. Unele fișiere de aici (de ex. traducerile Therzie) sunt totuși folosite de moduri - șterge doar ce știi că e rămas.`, `${rel}\nIt is removed from the profile and from the server. Some files here (e.g. Therzie's translations) are still used by mods - delete only what you know is left over.`), L('Șterge', 'Delete'))) return;
+    const d = await window.vp.act('deleteConfigs', [rel]);
+    toast(d.ok ? L(`${rel} șters${d.remote ? ' (și de pe server)' : ''}.`, `${rel} deleted${d.remote ? ' (from the server too)' : ''}.`) : d.error, d.ok ? 'ok' : 'error');
+    if (d.ok) { CFG.changes = new Map(); CFG.rawText = null; openConfigDrawer('', CFG.title); }
+    return;
+  }
   const rb = e.target.closest('#cfg-restart');
   if (rb) {
     rb.disabled = true; rb.classList.add('working'); rb.textContent = 'Repornesc...';
@@ -1039,7 +1053,7 @@ function renderServers() {
     $('#set-srv-title').textContent = L(`Serverul acesta: ${cur.name}`, `This server: ${cur.name}`);
   }
   const gh = $('#gh-state');
-  if (gh) gh.innerHTML = st.githubUser ? `<span style="color:var(--green)">✓ Conectat ca <b>${esc(st.githubUser)}</b></span> - lista e un Gist privat pe contul tău.` : 'Pentru publicarea listei (un Gist privat pe contul tău). Merge și GitHub CLI (<code>gh</code>), dacă e logat.';
+  if (gh) gh.innerHTML = st.githubUser ? L(`<span style="color:var(--green)">✓ Conectat ca <b>${esc(st.githubUser)}</b></span> - lista e un Gist privat pe contul tău.`, `<span style="color:var(--green)">✓ Connected as <b>${esc(st.githubUser)}</b></span> - the list is a secret Gist on your account.`) : L('Pentru publicarea listei (un Gist privat pe contul tău). Merge și GitHub CLI (<code>gh</code>), dacă e logat.', 'To publish the list (a secret Gist on your account). The GitHub CLI (<code>gh</code>) works too, if it is logged in.');
   $('#btn-gh-clear').hidden = !st.githubUser; $('#btn-gh-login').hidden = !!st.githubUser || !st.githubLogin;
 }
 $('#srv-current').onclick = e => { e.stopPropagation(); $('#srv-menu').hidden = !$('#srv-menu').hidden; };

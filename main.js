@@ -586,11 +586,12 @@ function removePackageNow(key) {
   const users = Object.entries(pr.packages).filter(([k, x]) => k !== key && (x.deps || []).some(d => parseDep(d)?.full === key)).map(([k]) => k);
   if (users.length) return { ok: false, error: `Needed by: ${users.join(', ')}. Remove those first.` };
   if (p.role === 'recommended') { const s = srv(); delete s.recommended[key]; delete s.nexusChosen[key]; saveSettings(); }
+  const configs = [...(cfgIndex.owners || [])].filter(([, k]) => k === key).map(([r]) => r);
   pr.remove(key);
   for (const k of pr.orphans()) pr.remove(k);
   log(`${key} uninstalled`);
   afterProfileChange();
-  return { ok: true };
+  return { ok: true, configs };
 }
 async function updateAll() {
   if (job || queue.length || pumping) return enqueue('Update all mods', null, () => updateAllNow());
@@ -1095,6 +1096,27 @@ const cfgPath = rel => {
   return path.join(configDir(), ...rel.split('/'));
 };
 const sha1 = t => crypto.createHash('sha1').update(t).digest('hex');
+// config files of a removed mod: gone from the server first, then from the profile (the other way round the two-way
+// sync would bring them back), and from the sync's memory
+async function deleteConfigs(rels) {
+  rels = (Array.isArray(rels) ? rels : [rels]).filter(r => { try { cfgPath(r); return true; } catch { return false; } });
+  if (!rels.length) return { ok: false, error: 'Nothing to delete.' };
+  for (let i = 0; i < 30 && twoWayBusy; i++) await new Promise(r => setTimeout(r, 500));
+  const s = srv();
+  let remote = false;
+  if (isAdmin() && s.conn && s.syncConfigs) {
+    const tr = transport();
+    try { await tr.remove(tr.configDir, rels); remote = true; }
+    catch (e) { return { ok: false, error: `Could not delete them on the server: ${e.message}` }; }
+  }
+  for (const r of rels) { try { fs.rmSync(cfgPath(r), { force: true }); } catch { } }
+  const sf = path.join(serverDir(s.id), 'config-sync.json'), base = readJson(sf, {});
+  for (const r of rels) delete base[r];
+  writeJson(sf, base);
+  log(`Config files deleted${remote ? ' (profile + server)' : ''}: ${rels.join(', ')}`, 'done');
+  cfgIndex.sig = null; send('mods', modsPayload());
+  return { ok: true, deleted: rels.length, remote };
+}
 async function saveConfig({ rel, changes, text, expect }) {
   const p = cfgPath(rel);
   const cur = fs.readFileSync(p, 'utf8');
@@ -1593,6 +1615,7 @@ async function action(name, arg) {
       const text = fs.readFileSync(p, 'utf8');
       return { ok: true, text, hash: sha1(text), parsed: /\.cfg$/i.test(arg) ? bepcfg.parse(text) : null };
     } catch (e) { return { ok: false, error: e.message }; }
+    case 'deleteConfigs': try { return await deleteConfigs(arg); } catch (e) { return { ok: false, error: e.message }; }
     case 'saveConfig': try { return await saveConfig(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
     case 'restartIdle': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, what: 'new configs' }); } catch (e) { return { ok: false, error: e.message }; }
     case 'restart': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, force: true }); } catch (e) { return { ok: false, error: e.message }; }

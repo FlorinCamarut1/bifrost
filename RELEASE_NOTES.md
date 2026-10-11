@@ -1,5 +1,4 @@
-﻿## Bifrost 1.8.1 - everything in English
+﻿## Bifrost 1.8.2
 
-- Every message, question, toast, notification and status line is in English now: errors from the main process, the server status, the sync and config lines, the mods page, Discover and the Nexus note, the invite text you share with friends, the update card, the server wizard. Texts with values in them carry their English form in the code, so none can fall through the translation any more.
-- Checked by scanning the whole source and every page (admin, player, personal profile, no server) plus the Discover and Nexus panels: no Romanian text is left in English mode. Romanian stays available in Settings → Language.
-- The mods page update badge says "Update to the latest version" (it no longer mentions Thunderstore Mod Manager).
+- **Configs of removed mods**: after uninstalling a mod, Bifrost asks whether to delete its config files too (kept, a reinstall finds them again). Leftover files of mods uninstalled earlier show under *Mods → Other configs* with **Delete the file**. Both delete on the server first and then in the profile, so the two-way config sync does not bring them back.
+- English: the connected-account lines (Nexus, Thunderstore token, GitHub, server password) and "you have X" in mod dependencies were still Romanian - fixed, and checked over 25 simulated app states. Free Nexus accounts now read "one click on Slow download per file" (the button Nexus really shows).
