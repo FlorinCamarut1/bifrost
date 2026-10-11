@@ -310,6 +310,7 @@ function renderSettings() {
   }
   // restart / new join code only where Bifrost can do them
   $$('[data-act="fixcode"]').forEach(b => { b.hidden = !s.dockerServer; });
+  $('#btn-server-env').hidden = !(s.isAdmin && s.dockerServer);
   $$('[data-act="restart"]').forEach(b => { b.hidden = !s.canRestart; });
   renderServers();
   document.body.classList.toggle('role-admin', !!s.isAdmin); document.body.classList.toggle('role-player', !s.isAdmin);
@@ -639,6 +640,7 @@ $('#br-grid').addEventListener('click', e => {
 
 // detail drawer
 async function closeDrawer() {
+  if (S.drawer === 'env:' && envDirty() && !await confirmBox(L('Renunți la modificări?', 'Discard the changes?'), L('Ai setări de server nesalvate.', 'There are unsaved server settings.'), L('Renunță la ele', 'Discard them'))) return;
   if (String(S.drawer).startsWith('cfg:') && cfgDirty() && !await confirmBox('Renunți la modificări?', 'Ai modificări nesalvate în configurare.', 'Renunță la ele')) return;
   S.drawer = null; $('#drawer').hidden = true; $('#drawer-bg').hidden = true;
 }
@@ -680,7 +682,7 @@ async function openDrawer(full) {
   el.innerHTML = DOMPurify.sanitize(marked.parse(r.markdown || ''), { FORBID_TAGS: ['style', 'form', 'input', 'iframe'] });
   el.querySelectorAll('a[href]').forEach(a => { a.dataset.open = a.href; a.removeAttribute('href'); a.style.cursor = 'pointer'; });
 }
-function refreshDrawer() { if (!S.drawer || !S.catalog || /^(nx|cfg):/.test(String(S.drawer))) return; const p = S.catalog.find(x => x.full === S.drawer); const top = $('#dr-top'); if (p && top) top.innerHTML = drawerHead(p); }
+function refreshDrawer() { if (!S.drawer || !S.catalog || /^(nx|cfg|env):/.test(String(S.drawer))) return; const p = S.catalog.find(x => x.full === S.drawer); const top = $('#dr-top'); if (p && top) top.innerHTML = drawerHead(p); }
 $('#drawer').addEventListener('click', e => {
   const b = e.target.closest('[data-install]'); if (b) { installPkg(b.dataset.install); return; }
   const o = e.target.closest('[data-open]'); if (o && /^https:\/\//.test(o.dataset.open)) window.vp.act('open', o.dataset.open);
@@ -858,6 +860,87 @@ $('#drawer-body').addEventListener('click', async e => {
 });
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && String(S.drawer).startsWith('cfg:') && cfgDirty()) { e.preventDefault(); saveConfig(); }
+});
+
+// ---------- the server's settings (valheim.env of the valheim-server image) ----------
+const ENV = { file: null, text: null, vars: [], known: [], changes: {}, raw: false, rawText: null, busy: false, players: null };
+const envVal = k => (k in ENV.changes ? ENV.changes[k] : ENV.vars.find(v => v.key === k)?.value);
+const envDirty = () => ENV.raw ? ENV.rawText !== null && ENV.rawText !== ENV.text : Object.keys(ENV.changes).length > 0;
+async function openServerEnv() {
+  S.drawer = 'env:';
+  $('#drawer').hidden = false; $('#drawer-bg').hidden = false; $('#drawer').scrollTop = 0;
+  $('#drawer-body').innerHTML = `<div class="empty">${L('se încarcă...', 'loading...')}</div>`;
+  const r = await window.vp.act('serverEnvRead');
+  if (S.drawer !== 'env:') return;
+  if (!r.ok) { $('#drawer-body').innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
+  Object.assign(ENV, { file: r.file, text: r.text, vars: r.vars, known: r.known, changes: {}, raw: false, rawText: null, busy: false, players: r.players });
+  renderServerEnv();
+}
+function envRow(k, type, label, hint) {
+  const v = envVal(k), set = v !== undefined && v !== null, changed = k in ENV.changes;
+  let ctl;
+  if (type === 'bool') ctl = `<select class="select" data-env="${k}"><option value="" ${!set ? 'selected' : ''}>${L('(implicitul imaginii)', '(image default)')}</option><option value="true" ${set && /^true$/i.test(v) ? 'selected' : ''}>${L('da', 'yes')}</option><option value="false" ${set && /^false$/i.test(v) ? 'selected' : ''}>${L('nu', 'no')}</option></select>`;
+  else ctl = `<input class="txt" data-env="${k}" type="${type === 'password' ? 'password' : 'text'}" ${type === 'number' ? 'inputmode="numeric"' : ''} value="${esc(set ? v : '')}" placeholder="${L('nesetat', 'not set')}" spellcheck="false" autocomplete="off">`;
+  return `<div class="cfg-row ${changed ? 'changed' : ''}" data-envrow="${k}"><div class="cfg-l"><b>${esc(label)}</b><small><code>${k}</code>${hint ? ' - ' + esc(hint) : ''}</small></div><div class="cfg-c">${ctl}</div></div>`;
+}
+function renderServerEnv() {
+  const knownKeys = new Set(ENV.known.flatMap(([, rows]) => rows.map(r => r[0])));
+  const other = ENV.vars.filter(v => !knownKeys.has(v.key));
+  const body = ENV.raw ? `<textarea class="cfg-raw no-i18n" id="env-raw" spellcheck="false">${esc(ENV.rawText ?? ENV.text)}</textarea>`
+    : ENV.known.map(([g, rows]) => `<details class="cfg-sec" open><summary class="no-i18n">${esc(g)}</summary><div class="no-i18n">${rows.map(r => envRow(...r)).join('')}</div></details>`).join('')
+      + (other.length ? `<details class="cfg-sec" open><summary class="no-i18n">${L('Altele din fișier', 'Other variables in the file')}</summary><div class="no-i18n">${other.map(v => envRow(v.key, /PASS|TOKEN|KEY|SECRET/i.test(v.key) ? 'password' : 'text', v.key, '')).join('')}</div></details>` : '');
+  const n = ENV.raw ? (envDirty() ? 1 : 0) : Object.keys(ENV.changes).length;
+  $('#drawer-body').innerHTML = `
+    <div class="cfg-head"><h2>${L('Setări server', 'Server settings')}</h2><div class="muted"><span class="no-i18n">${esc(ENV.file)}</span> · ${L('se aplică la recrearea containerului (serverul repornește)', 'applied when the container is recreated (the server restarts)')}</div></div>
+    <div class="cfg-tools"><span class="muted small">${L('Gol = nesetat (imaginea folosește valoarea ei implicită).', 'Empty = not set (the image uses its default).')}</span>
+      <div class="seg" id="env-mode"><button class="${ENV.raw ? '' : 'on server'}" data-mode="form">${L('Setări', 'Settings')}</button><button class="${ENV.raw ? 'on server' : ''}" data-mode="raw">Text</button></div></div>
+    <div id="cfg-body">${body}</div>
+    <div class="cfg-bar" id="env-bar"><span class="${n ? '' : 'muted'}">${n ? L(`${n} modificări nesalvate`, `${n} unsaved ${n === 1 ? 'change' : 'changes'}`) : L('Nicio modificare', 'No changes')}</span>
+      <div class="row gap"><button class="btn ghost small" id="env-discard" ${n ? '' : 'disabled'}>${L('Renunță', 'Discard')}</button><button class="btn primary ${ENV.busy ? 'working' : ''}" id="env-save" ${n && !ENV.busy ? '' : 'disabled'}>${ENV.busy ? L('Salvez...', 'Saving...') : L('Salvează', 'Save')}</button></div></div>`;
+}
+async function saveServerEnv() {
+  if (ENV.busy) return;
+  ENV.busy = true; renderServerEnv();
+  const r = await window.vp.act('serverEnvSave', ENV.raw ? { text: ENV.rawText, expect: ENV.text } : { changes: ENV.changes, expect: ENV.text });
+  ENV.busy = false;
+  if (!r.ok) { toast(r.error, 'error'); if (/changed on the server/.test(r.error)) openServerEnv(); else renderServerEnv(); return; }
+  if (r.unchanged) { toast(L('Nimic de salvat.', 'Nothing to save.')); openServerEnv(); return; }
+  const p = ENV.players;
+  const now = await confirmBox(L('Aplici acum?', 'Apply now?'),
+    L(`Salvat (${r.changed.join(', ')}). Ca să se aplice, containerul se recreează și serverul repornește (~2-3 minute)${p ? ` - ${p} jucători online vor fi deconectați` : ''}. Poți aplica și mai târziu, de aici.`,
+      `Saved (${r.changed.join(', ')}). To apply it, the container is recreated and the server restarts (~2-3 minutes)${p ? ` - ${p} ${p === 1 ? 'player' : 'players'} online will be disconnected` : ''}. You can also apply it later from here.`),
+    L('Aplică acum', 'Apply now'));
+  if (now) { const a = await window.vp.act('serverEnvApply'); toast(a.ok ? L('Se aplică - serverul repornește în fundal.', 'Applying - the server restarts in the background.') : a.error, a.ok ? 'ok' : 'error'); }
+  else toast(L('Salvat. Se aplică la următoarea recreare a containerului.', 'Saved. It applies at the next container recreate.'), 'ok');
+  openServerEnv();
+}
+$('#btn-server-env').onclick = () => openServerEnv();
+$('#drawer-body').addEventListener('input', e => {
+  if (S.drawer !== 'env:') return;
+  if (e.target.id === 'env-raw') { ENV.rawText = e.target.value; const bar = $('#env-bar'); if (bar) renderServerEnvBar(); return; }
+  const k = e.target.dataset?.env; if (!k) return;
+  const orig = ENV.vars.find(v => v.key === k)?.value, v = e.target.value === '' ? null : e.target.value;
+  if ((v ?? null) === (orig ?? null)) delete ENV.changes[k]; else ENV.changes[k] = v;
+  $(`#cfg-body [data-envrow="${k}"]`)?.classList.toggle('changed', k in ENV.changes);
+  renderServerEnvBar();
+});
+function renderServerEnvBar() {
+  const bar = $('#env-bar'); if (!bar) return;
+  const n = ENV.raw ? (envDirty() ? 1 : 0) : Object.keys(ENV.changes).length;
+  bar.querySelector('span').textContent = n ? L(`${n} modificări nesalvate`, `${n} unsaved ${n === 1 ? 'change' : 'changes'}`) : L('Nicio modificare', 'No changes');
+  bar.querySelector('span').className = n ? '' : 'muted';
+  $('#env-discard').disabled = !n; $('#env-save').disabled = !n || ENV.busy;
+}
+$('#drawer-body').addEventListener('click', async e => {
+  if (S.drawer !== 'env:') return;
+  const md = e.target.closest('#env-mode button');
+  if (md) {
+    const raw = md.dataset.mode === 'raw'; if (raw === ENV.raw) return;
+    if (envDirty() && !await confirmBox(L('Renunți la modificări?', 'Discard the changes?'), L('Ca să schimbi modul de editare, salvează sau renunță la modificări.', 'To switch the editing mode, save or discard the changes.'), L('Renunță la ele', 'Discard them'))) return;
+    Object.assign(ENV, { raw, rawText: null, changes: {} }); renderServerEnv(); return;
+  }
+  if (e.target.closest('#env-discard')) { Object.assign(ENV, { rawText: null, changes: {} }); renderServerEnv(); return; }
+  if (e.target.closest('#env-save')) saveServerEnv();
 });
 
 // ---------- player: home ----------

@@ -127,6 +127,7 @@
     'După instalare îl marchezi la': 'After installing, mark it under', '(Server / Client).': '(Server / Client).', 'Doar arhivele .zip și .7z se pot instala automat.': 'zip, 7z, rar and bare DLLs install automatically.',
     'endorsements': 'endorsements', 'Fișiere': 'Files', 'Niciun fișier activ.': 'No active files.',
     // ---- English sweep ----
+    "Setări server": "Server settings",
     "Setări → Nexus Mods": "Settings → Nexus Mods",
     "- lista e un Gist privat pe contul tău.": "- the list is a secret Gist on your account.",
     "Nu ajung la server prin SSH.": "Cannot reach the server over SSH.",

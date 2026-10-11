@@ -39,6 +39,7 @@ const { makeTransport, walk, normSha } = require('./lib/transport');
 const { syncMods } = require('./lib/modsync');
 const { syncConfigs, SKIP: CFG_SKIP, safeRel } = require('./lib/serversync');
 const bepcfg = require('./lib/bepcfg');
+const serverenv = require('./lib/serverenv');
 const { metadata: dllMetadata } = require('./lib/dllmeta');
 const a2s = require('./lib/a2s');
 const tsprofile = require('./lib/tsprofile');
@@ -923,7 +924,7 @@ async function maybeRestart({ manual, what = '', force } = {}) {
 // the server restart (2-3 minutes until a join code) runs in the background: mods can be installed meanwhile, and a
 // sync asked for during it runs right after
 let restarting = false, syncAfterRestart = null;
-async function restartServer({ fast } = {}) {
+async function restartServer({ fast, recreate } = {}) {
   const tr = transport();
   restarting = true; watch.restarting = Date.now(); setWatch('restarting', 'repornesc serverul...');
   log(`▶ Restart server (${tr.label()})`, 'start');
@@ -932,7 +933,13 @@ async function restartServer({ fast } = {}) {
     // after a mod sync: only the game is restarted (the container restart + Steam update check took minutes);
     // anything unexpected -> the full container restart
     let quick = false;
-    if (fast && tr.reloadModsAndRestartGame) {
+    if (recreate) {
+      const info = await tr.composeInfo();
+      if (!info) throw new Error('The container was not started with docker compose.');
+      log('  recreating the container with the new settings (docker compose up -d)', 'out');
+      await tr.composeUp(info);
+      quick = true;
+    } else if (fast && tr.reloadModsAndRestartGame) {
       try { quick = await tr.reloadModsAndRestartGame(); } catch (e) { log(`  quick restart not possible (${e.message}) - restarting the container`, 'out'); }
       if (quick) log('  mods copied into the game, only the game process restarts', 'out');
     }
@@ -1117,6 +1124,52 @@ async function deleteConfigs(rels) {
   cfgIndex.sig = null; send('mods', modsPayload());
   return { ok: true, deleted: rels.length, remote };
 }
+// ---------- the server's own settings (valheim-server image: the compose env_file) ----------
+async function serverEnvLocate() {
+  const s = srv(), tr = transport();
+  if (!isAdmin() || !tr?.docker) throw new Error('Only for Docker servers (valheim-server image) reached over SSH.');
+  const info = await tr.composeInfo();
+  if (!info) throw new Error('The container was not started with docker compose - its variables cannot be edited from here.');
+  const composeTexts = [];
+  for (const f of info.files) { try { composeTexts.push(await tr.hostRead(f)); } catch { } }
+  const files = serverenv.envFiles(composeTexts, info.workdir, info.service);
+  if (!files.length) throw new Error('The compose file has no env_file for this service - its variables are written inside docker-compose.yaml.');
+  return { tr, info, file: files[files.length - 1] };
+}
+async function serverEnvRead() {
+  const { tr, info, file } = await serverEnvLocate();
+  const text = await tr.hostRead(file);
+  return { ok: true, file, workdir: info.workdir, text, vars: serverenv.parse(text), known: serverenv.KNOWN, players: status.players ?? null };
+}
+async function serverEnvSave({ changes, text, expect }) {
+  const { tr, file } = await serverEnvLocate();
+  const cur = await tr.hostRead(file);
+  if (expect !== undefined && cur !== expect) throw new Error('The file changed on the server meanwhile - it was reloaded, make the change again.');
+  const next = typeof text === 'string' ? (text.endsWith('\n') ? text : text + '\n') : serverenv.apply(cur, changes || {});
+  const why = serverenv.check(serverenv.parse(next));
+  if (why) throw new Error(why);
+  if (next === cur) return { ok: true, unchanged: true };
+  await tr.hostWriteWithBackup(file, next);
+  const before = Object.fromEntries(serverenv.parse(cur).map(v => [v.key, v.value]));
+  const after = Object.fromEntries(serverenv.parse(next).map(v => [v.key, v.value]));
+  const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(k => before[k] !== after[k]);
+  log(`Server settings changed (${path.posix.basename(file)}, backup kept next to it): ${changed.map(k => /PASS|TOKEN|KEY|SECRET/i.test(k) ? `${k}=***` : `${k}=${after[k] ?? '(removed)'}`).join(', ')}`, 'done');
+  // the password Bifrost uses for joining directly follows the server's
+  if (changed.includes('SERVER_PASS')) { const s = srv(); s.joinPassEnc = after.SERVER_PASS ? enc(after.SERVER_PASS) : null; saveSettings(); send('settings', publicSettings()); }
+  return { ok: true, changed };
+}
+// recreate the container in the background (the restart path waits for the join code as usual)
+function serverEnvApply() {
+  if (restarting) return { ok: false, error: 'The server is restarting already - wait for it to finish.' };
+  if (job) return { ok: false, error: 'Already working - try again in a few seconds.' };
+  restartServer({ recreate: true }).then(r => {
+    watch.lastResult = { kind: 'ok', text: r.joinCode ? `Server settings applied - join code ${r.joinCode}` : 'Server settings applied', what: '' };
+    notify('Bifrost', r.joinCode ? `Server settings applied - join code ${r.joinCode}` : 'Server settings applied');
+    setWatch('idle', 'up to date'); pollStatus(); schedulePublish('server settings');
+  }).catch(e => { log(`■ Applying the server settings failed: ${e.message}`, 'error'); toast(e.message, 'error'); setWatch('error', 'error'); });
+  return { ok: true, started: true };
+}
+
 async function saveConfig({ rel, changes, text, expect }) {
   const p = cfgPath(rel);
   const cur = fs.readFileSync(p, 'utf8');
@@ -1615,6 +1668,9 @@ async function action(name, arg) {
       const text = fs.readFileSync(p, 'utf8');
       return { ok: true, text, hash: sha1(text), parsed: /\.cfg$/i.test(arg) ? bepcfg.parse(text) : null };
     } catch (e) { return { ok: false, error: e.message }; }
+    case 'serverEnvRead': try { return await serverEnvRead(); } catch (e) { return { ok: false, error: e.message }; }
+    case 'serverEnvSave': try { return await serverEnvSave(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
+    case 'serverEnvApply': return serverEnvApply();
     case 'deleteConfigs': try { return await deleteConfigs(arg); } catch (e) { return { ok: false, error: e.message }; }
     case 'saveConfig': try { return await saveConfig(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
     case 'restartIdle': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, what: 'new configs' }); } catch (e) { return { ok: false, error: e.message }; }

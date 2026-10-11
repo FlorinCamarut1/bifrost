@@ -83,6 +83,10 @@ Then, automatically:
   too (for players it only decides required vs. recommended). A mass removal (an emptied profile) is refused.
 - **configs**: `BepInEx/config` ↔ server, 3-way (whoever changed since the last sync wins; on first contact the server
   wins for server mods, the player for client mods). Runtime data (saves, logs) is skipped.
+- **server settings** (valheim-server Docker image started with docker compose): *Server → Server settings* edits the variables
+  in the compose env_file (name, password, world, public list, crossplay, backups, update/restart schedules, admin/ban
+  lists, any other variable, or the raw file). A backup of the file is kept next to it; *Apply now* recreates the
+  container in the background (`docker compose up -d`) and waits for the join code.
 - **editing configs**: *Mods → ⚙* opens every setting of a mod (toggles, lists, numbers, with the description and
   default BepInEx writes; or the raw file). *Save* writes it into the profile and sends it to the server at once;
   *Restart the server when empty* applies it for mods that only read their config at start.
