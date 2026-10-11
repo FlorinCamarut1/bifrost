@@ -402,3 +402,5 @@ body:not(.no-server) [data-need="none"] { display: none !important; }
 .cfg-bar.done { color: var(--green); }
 .cfg-bar.done .btn { flex: none; }
 .cfg-orphan { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--line2); border-radius: 10px; }
+.tag.on { border-color: #5fd09a66; color: var(--green); }
+.tag.on::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 6px; vertical-align: 1px; }

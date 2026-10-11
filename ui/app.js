@@ -81,8 +81,9 @@ function renderStatus() {
   if (s.publicIp) addrs.push(['Public (prieteni)', s.publicIp]);
   $('#srv-addresses').innerHTML = addrs.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><code>${esc(v)}</code><button class="icon-btn" data-copy="${esc(v)}" title="Copiază"><svg class="ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button></div>`).join('');
   $('#srv-recent').innerHTML = (s.recent || []).length
-    ? s.recent.map(r => `<span class="tag" title="ultima intrare ${esc(r.t ? clock(r.t) : '')}">${esc(r.name)}</span>`).join('')
-    : '<span class="muted small">nimeni încă</span>';
+    // the ones on the server right now first, with a green dot
+    ? [...s.recent].sort((x, y) => ((s.online || []).includes(y.name) - (s.online || []).includes(x.name))).map(r => `<span class="tag ${(s.online || []).includes(r.name) ? 'on' : ''}" title="${esc((s.online || []).includes(r.name) ? L('pe server acum', 'on the server now') : L(`ultima intrare ${r.t ? clock(r.t) : ''}`, `last joined ${r.t ? clock(r.t) : ''}`))}">${esc(r.name)}</span>`).join('')
+    : `<span class="muted small">${L('nimeni încă', 'nobody yet')}</span>`;
   $('#srv-codebroken').hidden = !(s.reachable && s.container === 'running' && s.codeBroken);
   const down = $('#srv-down');
   if (s.reachable === false) { down.hidden = false; down.innerHTML = `<b>Nu ajung la server prin SSH.</b> <span class="muted">${esc(s.error || '')}</span>`; }
