@@ -751,6 +751,7 @@ function renderConfig() {
     ${S.settings?.isAdmin && CFG.rel && /\.cfg$/i.test(CFG.rel) && !CFG.err ? `<label class="cfg-share"><div><b>${L('Și prietenii primesc setările din fișierul ăsta', 'Players get the settings of this file too')}</b><small>${L('Ce ai schimbat față de valorile implicite ajunge și în configul lor, la JOACĂ. Pentru setările pe care serverul nu le trimite (de ex. timpul de îmblânzire: îl calculează jocul jucătorului de lângă animal).', 'What you changed from the defaults reaches their config too, on PLAY. For settings the server does not send (e.g. taming time: the game of the player next to the animal works it out).')}</small></div><span class="switch"><input type="checkbox" id="cfg-share" ${(S.settings.server?.sharedConfigs || []).includes(CFG.rel) ? 'checked' : ''}><span></span></span></label>` : ''}
     ${CFG.key === '' && CFG.rel ? `<div class="cfg-orphan"><span class="muted small">${L('Niciun mod instalat nu folosește fișierul ăsta (rămas de la un mod dezinstalat?).', 'No installed mod uses this file (left from an uninstalled mod?).')}</span><button class="btn small danger" id="cfg-delete">${L('Șterge fișierul', 'Delete the file')}</button></div>` : ''}
     <div class="cfg-tools">${f?.parsed && !CFG.raw ? `<input class="txt" id="cfg-q" placeholder="Caută o setare..." value="${esc(CFG.q)}">` : `<span class="muted small no-i18n">${esc(CFG.rel || '')}</span>`}
+      ${f?.parsed && !CFG.raw ? `<button class="btn small ghost" id="cfg-defaults" title="${L('Pune toate setările din fișierul ăsta la valorile implicite ale modului. Se aplică după Salvează.', 'Set every setting in this file to its default value. Applied when you press Save.')}">${L('Valori implicite', 'Restore defaults')}</button>` : ''}
       ${f?.parsed ? `<div class="seg" id="cfg-mode"><button class="${CFG.raw ? '' : 'on server'}" data-mode="form">Setări</button><button class="${CFG.raw ? 'on server' : ''}" data-mode="raw">Text</button></div>` : ''}</div>
     <div id="cfg-body">${body}</div>
     <div class="cfg-bar" id="cfg-bar"></div>`;
@@ -851,6 +852,22 @@ $('#drawer-body').addEventListener('click', async e => {
     const raw = md.dataset.mode === 'raw'; if (raw === CFG.raw) return;
     if (cfgDirty() && !await confirmBox('Renunți la modificări?', 'Ca să schimbi modul de editare, salvează sau renunță la modificări.', 'Renunță la ele')) return;
     Object.assign(CFG, { raw, rawText: null, changes: new Map() }); renderConfig(); return;
+  }
+  if (e.target.closest('#cfg-defaults')) {
+    const todo = [], bare = [];
+    CFG.file.parsed.sections.forEach((sec, si) => sec.entries.forEach((en, ei) => {
+      const id = `${si}.${ei}`, v = CFG.changes.has(id) ? CFG.changes.get(id) : en.value;
+      if (en.def === null) bare.push(en.key); else if (en.def !== v) todo.push([id, en.def]);
+    }));
+    const note = bare.length ? L(` ${bare.length} setări nu au valoare implicită în fișier și rămân cum sunt.`, ` ${bare.length} ${bare.length === 1 ? 'setting has' : 'settings have'} no default in the file and stay as they are.`) : '';
+    if (!todo.length) { toast(L('Toate setările sunt deja la valorile implicite.', 'Every setting is already at its default.') + note); return; }
+    if (!await confirmBox(L('Pui valorile implicite?', 'Restore the defaults?'), L(`${todo.length} setări din ${CFG.rel} revin la valorile implicite ale modului. Le vezi marcate și se aplică doar după Salvează.`, `${todo.length} ${todo.length === 1 ? 'setting' : 'settings'} in ${CFG.rel} go back to the mod's defaults. They are marked below and only applied when you press Save.`) + note, L('Pune valorile implicite', 'Restore defaults'))) return;
+    const keepQ = CFG.q, open = $$('#cfg-body .cfg-sec').filter(d => d.open).map(d => d.dataset.sec);
+    for (const [id, v] of todo) cfgSet(id, v);
+    renderConfig();
+    CFG.q = keepQ; const qi = $('#cfg-q'); if (qi) { qi.value = keepQ; filterConfig(); }
+    $$('#cfg-body .cfg-sec').forEach(d => { if (open.includes(d.dataset.sec) || d.querySelector('.cfg-row.changed')) d.open = true; });
+    return;
   }
   if (e.target.closest('#cfg-discard')) { Object.assign(CFG, { rawText: null, changes: new Map() }); renderConfig(); return; }
   if (e.target.closest('#cfg-save')) { saveConfig(); return; }

@@ -1,6 +1,4 @@
-﻿## Bifrost 1.9.8
+﻿## Bifrost 1.9.9
 
-- Mods marked **deprecated** on Thunderstore can be installed again. They used to be left out of the catalog, so a server list that needs one (e.g. AzuExtendedPlayerInventory) could not install it on players' PCs. In Discover they show up only when you search for them, with an orange **deprecated** tag.
-- Mods that depend on a deprecated mod (e.g. Food Bag on AzuExtendedPlayerInventory) install with their dependency.
-- The catalog downloads again once after the update, to pick them up.
-- 1.9.7: share a mod's settings with players. 1.9.6: optional password in the server list. 1.9.5: config edits survive a server restart.
+- **Restore defaults** in a mod's settings (Mods → ⚙, next to Settings / Text): puts every setting of the open config file back to the mod's default value. The changed settings are marked, nothing is written until you press **Save** (Discard undoes it). Settings the file has no default for stay as they are.
+- 1.9.8: mods marked deprecated on Thunderstore (e.g. AzuExtendedPlayerInventory) can be installed - in Discover only when searched, with a "deprecated" tag. 1.9.7: share a mod's settings with players.
