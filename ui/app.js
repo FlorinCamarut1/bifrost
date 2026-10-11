@@ -416,6 +416,8 @@ function crossInstalled(name, author, from) {
     if (!mn) return false;
     // the very same name is enough (authors often use other handles on the other store: RustyMods / RustyNoodles)
     if (mn === n) return true;
+    // "Jotunn the Valheim Library" = Jotunn: the name goes on with a plain description - not "German", "RUS 0.10", "Patch"
+    if (mn.length >= 6 && n.startsWith(mn) && /^(the|by|library|reborn|redux|continued|updated|remastered)/.test(n.slice(mn.length))) return true;
     // looser matches only by the same author ("Valheim Armory" by MidnightsFX is not Therzie's Armory)
     const ma = from === 'thunderstore' ? normName(m.name.split('-')[0]) : normName(m.author);
     const sameAuthor = !!a && !!ma && (a === ma || (Math.min(a.length, ma.length) >= 5 && (a.includes(ma) || ma.includes(a))));
@@ -877,6 +879,9 @@ function renderPlayer() {
   const personal = !S.settings.isAdmin && !S.settings.server?.list;
   $$('#page-home [data-act="updateMods"], #page-home [data-act="refreshList"]').forEach(b => { b.hidden = personal; });
   $('#pl-code-box').hidden = personal;
+  // (no server: no address / join code rows, no joining hints)
+  for (const id of ['#pl-addr', '#pl-code2']) $(id).closest('.kv').hidden = personal;
+  if (personal) { $('#pl-howto-manual').hidden = true; $('#pl-howto-direct').hidden = true; }
   if (personal) { ring.className = 'ring ok'; $('#pl-mods-title').textContent = `Profil personal: ${P.installed} ${P.installed === 1 ? 'pachet' : 'pachete'}`; $('#pl-mods-sub').textContent = 'Modurile le alegi tu, din Descoperă.'; }
   else if (!m) { ring.className = 'ring busy'; $('#pl-mods-title').textContent = P.error ? 'Nu am putut lua lista serverului' : 'Iau lista serverului...'; $('#pl-mods-sub').textContent = P.error || ''; }
   else if (need) { ring.className = 'ring wait'; $('#pl-mods-title').textContent = `${P.plan.install.length} moduri de instalat / actualizat`; $('#pl-mods-sub').textContent = 'Se fac singure când apeși JOACĂ.'; }
@@ -897,7 +902,11 @@ function renderPlayer() {
 
   // Nexus files waiting for a click on the site
   const nw = $('#pl-nexus');
-  if (P.nexusWaiting?.length) {
+  if (!P.nexusWaiting?.length && P.nexusNeeded?.length && !S.settings.hasNexusKey) {
+    nw.hidden = false;
+    nw.innerHTML = `<span><b>Serverul are ${P.nexusNeeded.length} ${P.nexusNeeded.length === 1 ? 'mod' : 'moduri'} de pe Nexus Mods</b> <span>(${P.nexusNeeded.map(esc).join(', ')})</span>. <span>Pune-ți cheia Nexus și Bifrost le descarcă singur.</span></span>
+      <button class="btn small primary" id="btn-nexus-key-now">Adaugă cheia Nexus</button>`;
+  } else if (P.nexusWaiting?.length) {
     nw.hidden = false;
     nw.innerHTML = `<span><b>De pe Nexus:</b> pe pagina care s-a deschis apasă <b>„Mod Manager Download”</b> (sau „Slow download”) pentru: ${P.nexusWaiting.map(n => esc(n.title)).join(', ')}. Bifrost îl instalează singur.</span>
       <button class="btn small" data-nxpage="${P.nexusWaiting[0].modId}" data-file="${P.nexusWaiting[0].fileId}">Deschide pagina</button>`;
@@ -914,15 +923,32 @@ function renderProgress(p) {
   $('#pg-bar').style.width = `${Math.round(Math.min(1, frac) * 100)}%`;
   $('#pg-text').textContent = `${p.text || ''}${p.totalBytes ? ` · ${fmtMB(p.bytes)} / ${fmtMB(p.totalBytes)}` : ''}`;
 }
+// the server needs mods from Nexus and this player has no key yet: ask for it (Nexus' API key page opens beside)
+async function askNexusKey(mods) {
+  window.vp.act('open', 'https://next.nexusmods.com/settings/api-keys');
+  const list = (mods || []).slice(0, 6).join(', ') + ((mods || []).length > 6 ? ` și încă ${mods.length - 6}` : '');
+  const v = await confirmBox('Cheia ta Nexus Mods',
+    `Serverul folosește moduri de pe Nexus Mods (${list}). Ca să le descarc am nevoie de cheia ta personală: s-a deschis pagina nexusmods.com → Settings → API Keys - copiază de acolo „Personal API Key” și lipește-o aici. Premium: totul se descarcă singur. Cont gratuit: deschid pagina fiecărui fișier și apeși acolo „Slow download”, restul fac eu.`,
+    'Salvează și continuă', '');
+  if (!v) return false;
+  const r = await window.vp.act('setNexusKey', v);
+  if (!r.ok) { toast(`Cheia nu merge: ${r.error}`, 'error'); return false; }
+  toast(`Conectat la Nexus ca ${r.user.name}${r.user.premium ? ' (Premium)' : ''}.`, 'ok');
+  return true;
+}
 $('#btn-play').onclick = async () => {
   if (S.playPressed) return;
   // lock the button right away, before main answers
   S.playPressed = true; S.lastPlayError = null; renderPlayer();
+  let again = false;
   try {
     const r = await window.vp.act('play');
-    if (!r.ok) { S.lastPlayError = r.error; toast(r.error, 'error'); }
+    if (r.needNexusKey) again = await askNexusKey(r.mods);
+    else if (!r.ok) { S.lastPlayError = r.error; toast(r.error, 'error'); }
   } finally { S.playPressed = false; renderPlayer(); }
+  if (again) $('#btn-play').click();
 };
+document.addEventListener('click', async e => { if (e.target.closest('#btn-nexus-key-now')) { if (await askNexusKey(S.player?.nexusNeeded)) renderPlayer(); } });
 $('#pl-copy-code').onclick = async () => { const c = S.player?.manifest?.server?.joinCode; if (!c) return; await window.vp.act('copy', c); toast(`Join code copiat: ${c}`, 'ok'); };
 $('#pl-rec').addEventListener('change', e => { const i = e.target.closest('[data-rec]'); if (i) window.vp.act('setRecommended', { key: i.dataset.rec, on: i.checked, nexus: !!i.dataset.nx }); });
 document.addEventListener('click', e => { const b = e.target.closest('[data-nxpage]'); if (b) window.vp.act('nexusPage', { modId: +b.dataset.nxpage, fileId: +b.dataset.file }); });

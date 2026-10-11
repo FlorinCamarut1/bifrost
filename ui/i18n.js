@@ -126,6 +126,11 @@
     'Nexus nu spune dacă un mod e de server sau de client - citește descrierea de pe Nexus.': 'Nexus does not say whether a mod is server or client - read its description on Nexus.',
     'După instalare îl marchezi la': 'After installing, mark it under', '(Server / Client).': '(Server / Client).', 'Doar arhivele .zip și .7z se pot instala automat.': 'zip, 7z, rar and bare DLLs install automatically.',
     'endorsements': 'endorsements', 'Fișiere': 'Files', 'Niciun fișier activ.': 'No active files.',
+    // ---- Nexus on join ----
+    "Cheia ta Nexus Mods": "Your Nexus Mods key",
+    "Salvează și continuă": "Save and continue",
+    "Adaugă cheia Nexus": "Add the Nexus key",
+    "Pune-ți cheia Nexus și Bifrost le descarcă singur.": "Add your Nexus key and Bifrost downloads them by itself.",
     // ---- 1.6 review ----
     "Reîncerc în 5 minute.": "Retrying in 5 minutes.",
     "Repornește serverul din panoul hostului ca să le încarce.": "Restart the server from the host's panel to load them.",
@@ -250,6 +255,13 @@
     'Nu găsesc Valheim (Steam). Alege folderul jocului în Setări.': 'Valheim not found (Steam). Choose the game folder in Settings.',
   };
   const PATTERNS = [
+    [/^Serverul folosește moduri de pe Nexus Mods \((.+?)\)\. Ca să le descarc .*$/, (m, l) => `The server uses mods from Nexus Mods (${l.replace(/ și încă (\d+)$/, ' and $1 more')}). To download them Bifrost needs your personal key: the page nexusmods.com → Settings → API Keys has opened - copy the "Personal API Key" there and paste it here. Premium: everything downloads by itself. Free account: Bifrost opens each file's page and you press "Slow download" there, the rest is automatic.`],
+    [/^Serverul are (\d+) (mod|moduri) de pe Nexus Mods$/, (m, n) => `The server has ${n} ${n === '1' ? 'mod' : 'mods'} from Nexus Mods`],
+    [/^(.+) instalat\. Încă (\d+) de pe Nexus - pe pagina care se deschide apasă „Slow download”\.$/, '$1 installed. $2 more from Nexus - press "Slow download" on the page that opens.'],
+    [/^(.+) instalat - toate modurile de pe Nexus sunt gata, pornesc Valheim\.$/, '$1 installed - all Nexus mods are ready, starting Valheim.'],
+    [/^(.+) instalat\.$/, '$1 installed.'],
+    [/^Conectat la Nexus ca (.+?)( \(Premium\))?\.$/, 'Connected to Nexus as $1$2.'],
+    [/^Cheia nu merge: (.+)$/, 'The key does not work: $1'],
     [/^Repornit - join code (\d+)$/, 'Restarted - join code $1'],
     [/^acest PC: (.+)$/, 'this PC: $1'],
     [/^Prietenii îl iau de pe Nexus \((.*)\)$/, 'Friends get it from Nexus ($1)'],
@@ -304,7 +316,10 @@
     [/^Se descarcă Bifrost (\S+)\.\.\.$/, 'Downloading Bifrost $1...'], [/^Bifrost (\S+) \(din sursă\) · (\d+) servere$/, 'Bifrost $1 (from source) · $2 servers'],
   ];
   const norm = s => s.replace(/\s+/g, ' ').trim();
-  function t(s) {
+  // English plurals for one: "1 mods" -> "1 mod"
+  const one = r => typeof r === 'string' ? r.replace(/(^|[^\d.,])1 (mod|server|package|file|player|change)s\b/g, '$11 $2') : r;
+  function t(s) { return one(t0(s)); }
+  function t0(s) {
     if (!s) return s;
     const k = norm(s);
     if (!k) return s;
