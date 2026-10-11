@@ -1465,7 +1465,7 @@ async function nexusInstallNow(e, nxm) {
   log(`▶ ${job.label}`, 'start');
   try {
     setProgress({ phase: 'install', text: e.title, done: 0, total: 1 });
-    await installNexus({ key: `nexus-${e.modId}`, full: `nexus-${e.modId}`, ver: String(e.version || e.fileId), role: e.role || 'user', title: e.title, modId: e.modId, fileId: e.fileId }, nxm);
+    await installNexus({ key: `nexus-${e.modId}`, full: `nexus-${e.modId}`, ver: String(e.version || e.ver || e.fileId), role: e.role || 'user', title: e.title, modId: e.modId, fileId: e.fileId }, nxm);
     if (e.role === 'recommended') { srv().nexusChosen[`nexus-${e.modId}`] = true; saveSettings(); }
     delete nexusPending[e.modId];
     nexusWaiting = nexusWaiting.filter(n => n.modId !== e.modId);
