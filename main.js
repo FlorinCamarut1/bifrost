@@ -958,9 +958,14 @@ async function restartServer({ fast, recreate } = {}) {
       }
       if (code) { log(`■ Server up - join code ${code}`, 'done'); return { ok: true, joinCode: code }; }
       if (!bad) { log('■ Server up (no join code - crossplay off?)', 'done'); return { ok: true }; }
-      log(`  the join code check crashed on the server (attempt ${attempt}) - restarting only the game`, 'out');
+      // restarting again at once kept failing (2026-10-11: 9 crashes in a row, every 2-3 minutes): the game is stopped
+      // for a while first, longer each time, so PlayFab drops the stale lobbies with that join code
+      const pause = [60, 180, 300][attempt - 1] || 300;
+      log(`  the join code check crashed on the server (attempt ${attempt}) - stopping the game for ${pause / 60} min, then starting it again`, 'out');
+      await tr.stopGame().catch(() => { });
+      await new Promise(r => setTimeout(r, pause * 1000));
       since = Math.floor(Date.now() / 1000);
-      await tr.restartGame();
+      await tr.startGame();
     }
     return { ok: true };
   } finally {
