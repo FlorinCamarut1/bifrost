@@ -1,4 +1,4 @@
-﻿## Bifrost 1.9.1
+﻿## Bifrost 1.9.2
 
-- **Players online are counted right**: Bifrost used the server session's own counter ("now N player(s)"), which Valheim does not always update - after the last player left it never said 0, and once it said 2 right after a leave. Bifrost now follows each character: online from "Got character ZDOID from <name>" until the server drops that character (within about a minute of leaving), cross-checked with the server's "Connections N" line. This also makes "restart only when nobody plays" more reliable.
-- The Server page shows who is on right now (green dot) in *Seen since start*.
+- **Players online, second fix**: a character gets a new id at every join, and the server does not always log when it drops one, so a player who left and came back counted twice ("2 online" with nobody on). Bifrost now follows the players by their Steam id through the ServerSync lines most server mods write ("Adding peer ... to validated list" / "Peer ... disconnected"), empties the list when the game restarts ("New session server"), and takes the names from the character each player brings in. A leave shows up about 90 seconds later (the server waits that long for a reconnect). Servers without ServerSync mods keep the previous method.
+- Checked by replaying the day's real server log: the count matched who was on at every point.
