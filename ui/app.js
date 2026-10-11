@@ -377,7 +377,7 @@ document.addEventListener('click', async e => {
     if (!ok) return;
   }
   if (act === 'fixcode') {
-    if (!await confirmBox('Join code nou?', 'Repornește doar procesul jocului (~1 minut). Jucătorii conectați sunt deconectați.', 'Repornește jocul')) return;
+    if (!await confirmBox('Join code nou?', 'Repornește doar procesul jocului (~2 minute). Jucătorii conectați sunt deconectați.', 'Repornește jocul')) return;
   }
   if (act === 'publishModpack') {
     const p = S.modpack;
@@ -395,7 +395,7 @@ document.addEventListener('click', async e => {
   else if (act === 'restart' && r.ok) toast(r.manualRestart ? 'Bifrost nu poate reporni serverul ăsta - repornește-l din panoul hostului.' : r.postponed ? 'Sunt jucători online - serverul repornește când se golește.' : r.joinCode ? `Server repornit. Join code: ${r.joinCode}` : 'Server repornit.', r.manualRestart ? 'info' : 'ok');
   else if (act === 'buildModpack' && r.ok) toast(`Zip construit: versiunea ${r.info.local}.`, 'ok');
   else if (act === 'publishModpack' && r.ok) toast(`Publicat ${r.version} pe Thunderstore.`, 'ok');
-  else if (act === 'fixcode' && r.ok) toast('Jocul repornește - codul nou apare în ~1 minut.', 'ok');
+  else if (act === 'fixcode' && r.ok) toast('Jocul repornește - codul nou apare în ~2 minute.', 'ok');
   else if (act === 'publishList' && r.ok) toast(r.changed ? 'Lista pentru prieteni e publicată.' : 'Lista era deja la zi.', 'ok');
   else if (act === 'updateMods' && r.ok) toast('Modurile sunt la zi.', 'ok');
   else if (act === 'play' && r.ok) toast('Pornesc Valheim prin Steam...', 'ok');

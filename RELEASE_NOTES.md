@@ -1,3 +1,3 @@
-﻿## Bifrost 1.9.3
+﻿## Bifrost 1.9.4
 
-- When Valheim's join code check crashes after a restart (the PlayFab bug that leaves a code nobody can use), Bifrost no longer restarts the game again at once - that kept failing (nine crashes in a row on 2026-10-11). It stops the game for 1, then 3, then 5 minutes before starting it again, so the stale lobbies with that code expire. The server came back with a new join code after such a pause.
+- Restarting only the game (the quick restart after a mod sync, and *New join code*) now stops the game, waits 30 seconds and starts it again, instead of an instant restart. The instant restart left the previous PlayFab lobby with the same join code behind, and the new session's join code check then crashed. A restart takes about 30 seconds longer.
