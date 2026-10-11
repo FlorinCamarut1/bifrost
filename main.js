@@ -930,6 +930,7 @@ async function restartServer({ fast, recreate } = {}) {
   log(`▶ Restart server (${tr.label()})`, 'start');
   try {
     let since = Math.floor(Date.now() / 1000);
+    const sent = await sendPendingWhileStopped(tr);
     // after a mod sync: only the game is restarted (the container restart + Steam update check took minutes);
     // anything unexpected -> the full container restart
     let quick = false;
@@ -944,6 +945,7 @@ async function restartServer({ fast, recreate } = {}) {
       if (quick) log('  mods copied into the game, only the game process restarts', 'out');
     }
     if (!quick) await tr.restart();
+    clearPending(sent);   // the game started with them
     const st = readState(); st.restartPending = false; writeState(st);
     if (!tr.docker) { log('■ Server restarted', 'done'); return { ok: true }; }
     // the valheim-server image: wait for an active join code; its join-code check sometimes crashes
@@ -1175,6 +1177,35 @@ function serverEnvApply() {
   return { ok: true, started: true };
 }
 
+// configs edited here that the server's game has not loaded yet: { rel: { sha, at } }. Many mods save their settings
+// when the game closes (OnDestroy -> Config.Save()), so stopping it wrote the old values over the edited file and the
+// sync then brought them back into the profile (OdinHorse "Time to Tame" never stuck, 2026-10-11). The sync never
+// pulls over these (lib/serversync.js `pending`), and a restart stops the game first, sends them again, then starts it.
+const pendingFile = () => path.join(serverDir(srv().id), 'config-pending.json');
+const readPending = () => readJson(pendingFile(), {});
+const writePending = p => writeJson(pendingFile(), p);
+function clearPending(rels) {
+  if (!rels.length) return;
+  const pd = readPending(); for (const r of rels) delete pd[r]; writePending(pd);
+}
+// before the game (re)starts: stop it (it saves its old settings now, over the edited files), send the edited configs
+// again while it is down; the start then loads them. Returns the files sent, to clear once the game has started.
+async function sendPendingWhileStopped(tr) {
+  const s = srv(), pd = readPending(), rels = Object.keys(pd);
+  if (!rels.length || !isAdmin() || !s.syncConfigs || !tr?.docker || typeof tr.stopGame !== 'function') return [];
+  const files = rels.map(rel => {
+    try { const data = fs.readFileSync(cfgPath(rel)); return normSha(data) === pd[rel].sha ? { name: rel, data } : null; } catch { return null; }
+  }).filter(Boolean);
+  if (!files.length) { writePending({}); return []; }
+  log(`  stopping the game first (mods save their old settings when it closes), then sending the edited configs again: ${files.map(f => f.name).join(', ')}`, 'out');
+  await tr.stopGame().catch(() => { });
+  await tr.put(tr.configDir, files);
+  const sf = path.join(serverDir(s.id), 'config-sync.json'), base = readJson(sf, {});
+  for (const f of files) base[f.name] = normSha(f.data);
+  writeJson(sf, base);
+  return files.map(f => f.name);
+}
+
 async function saveConfig({ rel, changes, text, expect }) {
   const p = cfgPath(rel);
   const cur = fs.readFileSync(p, 'utf8');
@@ -1192,6 +1223,7 @@ async function saveConfig({ rel, changes, text, expect }) {
   log(`Config edited: ${rel}${changes ? ` (${changes.map(c => `${c.key} = ${c.value}`).join(', ').slice(0, 300)})` : ''}`, 'done');
   const s = srv();
   if (!isAdmin() || !s.conn || !s.syncConfigs) return { ok: true, pushed: false, local: true, hash: sha1(next) };
+  { const pd = readPending(); pd[rel] = { sha: normSha(Buffer.from(next)), at: Date.now() }; writePending(pd); }
   // straight to the server (the config sync sees the local change); a job in progress -> it goes right after
   for (let i = 0; i < 30 && (twoWayBusy || job); i++) await new Promise(r => setTimeout(r, 500));
   if (twoWayBusy || job) return { ok: true, pushed: false, later: true, hash: sha1(next) };
@@ -1247,8 +1279,15 @@ async function twoWay(reason) {
     }
     if (s.syncConfigs) {
       const cacheFile = path.join(serverDir(s.id), 'remote-cache.json'), cache = readJson(cacheFile, {});
-      const r = await syncConfigs({ transport: tr, configDir: configDir(), stateFile: path.join(serverDir(s.id), 'config-sync.json'), sideOf: configSides, cache });
+      const r = await syncConfigs({ transport: tr, configDir: configDir(), stateFile: path.join(serverDir(s.id), 'config-sync.json'), sideOf: configSides, cache, pending: readPending() });
       if (tr.hashless) writeJson(cacheFile, cache);
+      clearPending(r.stale);
+      if (r.reverted.length) {
+        // the game stopped / restarted outside Bifrost and saved its old values over them: sent again, and they only
+        // take effect after a restart done here (stop, send, start)
+        log(`The server wrote its old values over edited configs (a mod saves its settings when the game stops) - sent them again: ${r.reverted.join(', ')}. They apply after the next restart.`, 'out');
+        const st = readState(); if (!st.restartPending) { st.restartPending = true; writeState(st); }
+      }
       res.push = r.push.length; res.pull = r.pull.length;
       if (r.push.length) log(`Configs sent to the server (${reason}): ${r.push.join(', ')}`, 'done');
       if (r.pull.length) log(`Configs brought from the server (${reason}): ${r.pull.join(', ')}`, 'done');
@@ -1684,7 +1723,9 @@ async function action(name, arg) {
       if (restarting) return { ok: false, error: 'Serverul repornește acum - așteaptă să termine.' };
       const tr = transport();
       if (typeof tr?.restartGame !== 'function') return { ok: false, error: 'Un join code nou se cere doar la serverele Docker (valheim-server); aici repornește serverul din panoul hostului.' };
-      await tr.restartGame(); setTimeout(pollStatus, 20000); setTimeout(pollStatus, 60000); return { ok: true };
+      const sent = await sendPendingWhileStopped(tr);
+      await tr.restartGame(); clearPending(sent);
+      setTimeout(pollStatus, 20000); setTimeout(pollStatus, 60000); return { ok: true };
     } catch (e) { return { ok: false, error: e.message }; }
     case 'startServer': try { await transport().ssh(`cd ~ && docker start ${s.conn.container}`); setTimeout(pollStatus, 5000); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
     case 'setSide': return setSide(arg.name, arg.side);

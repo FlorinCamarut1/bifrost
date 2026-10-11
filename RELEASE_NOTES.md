@@ -1,3 +1,3 @@
-﻿## Bifrost 1.9.4
+﻿## Bifrost 1.9.5
 
-- Restarting only the game (the quick restart after a mod sync, and *New join code*) now stops the game, waits 30 seconds and starts it again, instead of an instant restart. The instant restart left the previous PlayFab lobby with the same join code behind, and the new session's join code check then crashed. A restart takes about 30 seconds longer.
+- Config edits now survive a server restart. Many mods save their settings when the game closes, so stopping the server wrote the old values over the file Bifrost had just sent, the game started with them again, and the sync then brought them back into your profile (e.g. OdinHorse "Time to Tame" and "Food items" kept resetting). A restart now stops the game first, sends the configs you edited again while it is down, then starts it. Until the game has loaded them, the sync never pulls the server's copy over an edited config; if the server rewrites one anyway (a restart done outside Bifrost), it is sent again and the server restarts once nobody is playing.
