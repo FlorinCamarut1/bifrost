@@ -6,7 +6,7 @@ const L = (ro, en) => ((S.settings?.lang || 'en') === 'en' ? en : ro);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const S = { settings: {}, profile: { mods: [] }, status: {}, job: null, watch: {}, updates: {}, modpack: {}, filter: 'all', search: '',
   player: null, list: {}, appUpdate: null,
-  src: 'ts', nx: { list: [], total: 0, loading: false, error: null, installed: {}, pending: {}, seq: 0, cat: null, cats: null },
+  src: 'ts', nx: { list: [], total: 0, loading: false, error: null, installed: {}, pending: {}, seq: 0, cat: null, cats: null, old: false },
   installing: {}, catalog: null, catalogBusy: false, catalogFetched: null, bq: '', bsort: 'dl', bcat: null, bpacks: false, bdep: false, blimit: 60, drawer: null };
 
 // ---------- helpers ----------
@@ -528,6 +528,7 @@ $('#br-search').addEventListener('input', e => { S.bq = e.target.value; clearTim
 $('#br-sort').addEventListener('change', e => { S.bsort = e.target.value; renderBrowse(true); });
 $('#br-packs').addEventListener('change', e => { S.bpacks = e.target.checked; renderBrowse(true); });
 $('#br-dep').addEventListener('change', e => { S.bdep = e.target.checked; buildCats(); renderBrowse(true); });
+$('#br-old').addEventListener('change', e => { S.nx.old = e.target.checked; nexusSearch(true); });
 $('#br-cats').addEventListener('click', e => {
   const c = e.target.closest('[data-cat]'); if (!c) return;
   if (S.src === 'nx') { S.nx.cat = c.dataset.cat || null; buildNexusCats(); nexusSearch(true); return; }
@@ -536,12 +537,13 @@ $('#br-cats').addEventListener('click', e => {
 $('#btn-catalog').onclick = () => S.src === 'nx' ? nexusSearch(true) : loadCatalog(true);
 
 // ---------- browse: Nexus Mods ----------
+const NX_OUTDATED = Date.UTC(2024, 4, 14);   // = lib/nexus.js OUTDATED_BEFORE
 const NX_SORT = { dl: 'downloads', rating: 'endorsements', updated: 'updatedAt', created: 'createdAt' };
 function setSource(src) {
   S.src = src;
   $$('#br-source button').forEach(b => b.classList.toggle('on', b.dataset.src === src));
   if (src === 'nx') buildNexusCats(); else if (S.catalog) buildCats();
-  $('#br-packs-wrap').hidden = src === 'nx'; $('#br-dep-wrap').hidden = src === 'nx';
+  $('#br-packs-wrap').hidden = src === 'nx'; $('#br-dep-wrap').hidden = src === 'nx'; $('#br-old-wrap').hidden = src !== 'nx';
   $('#br-search').placeholder = src === 'nx' ? L('Caută pe Nexus Mods...', 'Search Nexus Mods...') : L('Caută în Thunderstore...', 'Search Thunderstore...');
   const note = $('#br-nexus-note');
   note.hidden = src !== 'nx';
@@ -557,7 +559,7 @@ async function nexusSearch(reset) {
   const nx = S.nx, seq = ++nx.seq;
   if (reset) { nx.list = []; nx.total = 0; $('#br-grid').innerHTML = Array.from({ length: 9 }, () => '<div class="skeleton"></div>').join(''); }
   nx.loading = true; $('#br-more').textContent = 'Caut pe Nexus...';
-  const [r, inst] = await Promise.all([window.vp.act('nexusSearch', { q: S.bq, sort: NX_SORT[S.bsort] || 'downloads', offset: nx.list.length, count: 30, cat: nx.cat }), reset ? window.vp.act('nexusInstalled') : null]);
+  const [r, inst] = await Promise.all([window.vp.act('nexusSearch', { q: S.bq, sort: NX_SORT[S.bsort] || 'downloads', offset: nx.list.length, count: 30, cat: nx.cat, old: nx.old }), reset ? window.vp.act('nexusInstalled') : null]);
   if (seq !== nx.seq) return;
   nx.loading = false;
   if (inst) { nx.installed = inst.installed; nx.pending = inst.pending; }
@@ -588,7 +590,7 @@ function renderNexus() {
     <div class="pk" data-nxpk="${m.modId}">
       ${m.thumbnailUrl ? `<img src="${esc(m.thumbnailUrl)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
       <div><div class="pk-name">${esc(m.name)}</div><div class="pk-owner">de ${esc(m.author || m.uploader?.name || '?')} · v${esc(m.version || '?')}</div><div class="pk-desc">${esc(m.summary)}</div></div>
-      <div class="pk-foot"><span class="pk-stat" title="descărcări">${ICON_DL}${fmtNum(m.downloads)}</span><span class="pk-stat" title="endorsements">${ICON_STAR}${fmtNum(m.endorsements)}</span>${m.modCategory ? `<span class="nx-cat">${esc(m.modCategory.name)}</span>` : ''}${nxButton(m)}</div>
+      <div class="pk-foot"><span class="pk-stat" title="descărcări">${ICON_DL}${fmtNum(m.downloads)}</span><span class="pk-stat" title="endorsements">${ICON_STAR}${fmtNum(m.endorsements)}</span>${m.modCategory ? `<span class="nx-cat">${esc(m.modCategory.name)}</span>` : ''}${Date.parse(m.updatedAt) < NX_OUTDATED ? '<span class="side-tag dep" title="Not updated since Ashlands (May 2024) - it may not work">outdated</span>' : ''}${nxButton(m)}</div>
     </div>`).join('');
   $('#br-more').textContent = !nx.list.length ? 'Nimic găsit.' : nx.list.length < nx.total ? `${nx.list.length} din ${nx.total.toLocaleString(LOC())} - derulează pentru mai multe` : `${nx.total} moduri`;
 }
