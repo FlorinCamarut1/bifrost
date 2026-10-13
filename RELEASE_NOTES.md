@@ -1,6 +1,7 @@
-﻿## Bifrost 1.9.14
+﻿## Bifrost 1.9.15
 
-- Discover → Nexus Mods has an **Outdated** switch (Nexus has no "deprecated" mark): mods not updated since Ashlands (May 2024) - most of them no longer work - are hidden unless it is on, and marked "outdated" when shown.
+- English fixes: Server → Check differences ("To copy / To remove"), the catalog download messages in Discover and the GitHub note in the add-server wizard were still in Romanian.
+- 1.9.14: Discover → Nexus Mods has an **Outdated** switch (Nexus has no "deprecated" mark): mods not updated since Ashlands (May 2024) - most of them no longer work - are hidden unless it is on, and marked "outdated" when shown.
 - 1.9.13: Discover → **Nexus Mods has categories** (Gameplay, Construction, Utilities, User Interface...), with the number of mods in each for what you searched.
 - The search box placeholder follows the app language when switching between Thunderstore and Nexus.
 - 1.9.12: **Delete all** in Mods → Other configs: removes every config file no installed mod uses (profile + server), after a confirmation.

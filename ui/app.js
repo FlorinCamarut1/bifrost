@@ -392,7 +392,7 @@ document.addEventListener('click', async e => {
   if (act === 'checkUpdates') { b.disabled = true; b.textContent = 'Caut...'; }
   const r = await window.vp.act(act, arg);
   if (act === 'checkUpdates') { b.disabled = false; b.textContent = 'Caută update-uri'; const n = (S.profile.mods || []).filter(hasUpdate).length; toast(n ? L(`${n} moduri au update în Thunderstore.`, `${n} ${n === 1 ? 'mod has an update' : 'mods have updates'} on Thunderstore.`) : L('Toate modurile sunt la ultima versiune.', 'All mods are on the latest version.'), 'ok'); return; }
-  if (act === 'dryrun' && r.ok) { const d = $('#dry-result'); d.hidden = false; d.innerHTML = `De copiat: <b>${esc(r.toCopy || '-')}</b><br>De scos: <b>${esc(r.toRemove || '-')}</b>`; return; }
+  if (act === 'dryrun' && r.ok) { const d = $('#dry-result'); d.hidden = false; d.innerHTML = `${L('De copiat', 'To copy')}: <b>${esc(r.toCopy || '-')}</b><br>${L('De scos', 'To remove')}: <b>${esc(r.toRemove || '-')}</b>`; return; }
   if (r && r.ok === false && r.error) toast(r.error, 'error');
   else if (act === 'restart' && r.ok) toast(r.manualRestart ? 'Bifrost nu poate reporni serverul ăsta - repornește-l din panoul hostului.' : r.postponed ? 'Sunt jucători online - serverul repornește când se golește.' : r.joinCode ? `Server repornit. Join code: ${r.joinCode}` : 'Server repornit.', r.manualRestart ? 'info' : 'ok');
   else if (act === 'buildModpack' && r.ok) toast(`Zip construit: versiunea ${r.info.local}.`, 'ok');
@@ -462,14 +462,14 @@ function sideTags(p) {
 async function loadCatalog(force) {
   if (S.catalog && !force) { renderBrowse(true); return; }
   if (!S.catalog) $('#br-grid').innerHTML = Array.from({ length: 9 }, () => '<div class="skeleton"></div>').join('');
-  $('#br-more').textContent = S.catalog ? '' : 'Descarc catalogul Thunderstore (~14 MB, câteva secunde)...';
+  $('#br-more').textContent = S.catalog ? '' : L('Descarc catalogul Thunderstore (~14 MB, câteva secunde)...', 'Downloading the Thunderstore catalog (~14 MB, a few seconds)...');
   const r = await window.vp.act(force ? 'refreshCatalog' : 'catalog');
   // (no catalog yet and no internet: nothing is cached, the next visit to Discover tries again)
   if (r.packages?.length) {
     S.catalog = r.packages.filter(p => !/^ebkr-r2modman/.test(p.full)).map(p => ({ ...p, hay: `${p.full} ${p.name.replace(/_/g, ' ')} ${p.owner} ${p.desc}`.toLowerCase() }));
     S.catalogFetched = r.fetched;
     buildCats();
-  } else if (!S.catalog) { $('#br-grid').innerHTML = ''; $('#br-more').textContent = 'Nu am putut descărca catalogul. Verifică internetul și apasă „Reîmprospătează catalogul”.'; return; }
+  } else if (!S.catalog) { $('#br-grid').innerHTML = ''; $('#br-more').textContent = L('Nu am putut descărca catalogul. Verifică internetul și apasă „Reîmprospătează”.', 'Could not download the catalog. Check the internet connection and press Refresh.'); return; }
   if (force) toast('Catalog actualizat.', 'ok');
   renderBrowse(true);
 }
@@ -1223,7 +1223,7 @@ function openWizard(mode) {
   w.querySelector('[data-sec="conn"]').hidden = !(mode === 'create' || mode === 'conn');
   w.querySelector('[data-sec="source"]').hidden = mode === 'conn';
   w.querySelector('[data-src="server"]').hidden = mode === 'local' || (mode === 'import' && !cur?.conn);
-  $('#wiz-note').textContent = mode === 'create' ? (S.settings.githubUser || S.settings.hasGithubToken ? '' : 'Lista pentru prieteni se publică după ce te conectezi la GitHub (Setări → Conturi) sau dacă ai GitHub CLI logat.') : '';
+  $('#wiz-note').textContent = mode === 'create' ? (S.settings.githubUser || S.settings.hasGithubToken ? '' : L('Lista pentru prieteni se publică după ce te conectezi la GitHub (Setări → Conturi) sau dacă ai GitHub CLI logat.', 'The list for friends is published once you connect GitHub (Settings → Accounts) or have the GitHub CLI logged in.')) : '';
   $('#wz-test-res').textContent = '';
   if (mode === 'conn' && cur?.conn) {
     const c = cur.conn;
