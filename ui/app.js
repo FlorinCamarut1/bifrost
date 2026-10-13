@@ -6,7 +6,7 @@ const L = (ro, en) => ((S.settings?.lang || 'en') === 'en' ? en : ro);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const S = { settings: {}, profile: { mods: [] }, status: {}, job: null, watch: {}, updates: {}, modpack: {}, filter: 'all', search: '',
   player: null, list: {}, appUpdate: null,
-  src: 'ts', nx: { list: [], total: 0, loading: false, error: null, installed: {}, pending: {}, seq: 0 },
+  src: 'ts', nx: { list: [], total: 0, loading: false, error: null, installed: {}, pending: {}, seq: 0, cat: null, cats: null },
   installing: {}, catalog: null, catalogBusy: false, catalogFetched: null, bq: '', bsort: 'dl', bcat: null, bpacks: false, bdep: false, blimit: 60, drawer: null };
 
 // ---------- helpers ----------
@@ -474,6 +474,7 @@ async function loadCatalog(force) {
   renderBrowse(true);
 }
 function buildCats() {
+  if (S.src === 'nx') return;   // Nexus shows its own categories (buildNexusCats)
   const count = {};
   for (const p of S.catalog) if (!isPack(p) && (!p.deprecated || S.bdep)) for (const c of p.cats || []) count[c] = (count[c] || 0) + 1;
   const cats = Object.entries(count).filter(([c]) => !/Update$|^Mods$|^Modpacks$/.test(c)).sort((a, b) => b[1] - a[1]).slice(0, 18);
@@ -527,7 +528,11 @@ $('#br-search').addEventListener('input', e => { S.bq = e.target.value; clearTim
 $('#br-sort').addEventListener('change', e => { S.bsort = e.target.value; renderBrowse(true); });
 $('#br-packs').addEventListener('change', e => { S.bpacks = e.target.checked; renderBrowse(true); });
 $('#br-dep').addEventListener('change', e => { S.bdep = e.target.checked; buildCats(); renderBrowse(true); });
-$('#br-cats').addEventListener('click', e => { const c = e.target.closest('[data-cat]'); if (!c) return; S.bcat = c.dataset.cat || null; buildCats(); renderBrowse(true); });
+$('#br-cats').addEventListener('click', e => {
+  const c = e.target.closest('[data-cat]'); if (!c) return;
+  if (S.src === 'nx') { S.nx.cat = c.dataset.cat || null; buildNexusCats(); nexusSearch(true); return; }
+  S.bcat = c.dataset.cat || null; buildCats(); renderBrowse(true);
+});
 $('#btn-catalog').onclick = () => S.src === 'nx' ? nexusSearch(true) : loadCatalog(true);
 
 // ---------- browse: Nexus Mods ----------
@@ -535,8 +540,9 @@ const NX_SORT = { dl: 'downloads', rating: 'endorsements', updated: 'updatedAt',
 function setSource(src) {
   S.src = src;
   $$('#br-source button').forEach(b => b.classList.toggle('on', b.dataset.src === src));
-  $('#br-cats').hidden = src === 'nx'; $('#br-packs-wrap').hidden = src === 'nx'; $('#br-dep-wrap').hidden = src === 'nx';
-  $('#br-search').placeholder = src === 'nx' ? 'Caută pe Nexus Mods...' : 'Caută în Thunderstore...';
+  if (src === 'nx') buildNexusCats(); else if (S.catalog) buildCats();
+  $('#br-packs-wrap').hidden = src === 'nx'; $('#br-dep-wrap').hidden = src === 'nx';
+  $('#br-search').placeholder = src === 'nx' ? L('Caută pe Nexus Mods...', 'Search Nexus Mods...') : L('Caută în Thunderstore...', 'Search Thunderstore...');
   const note = $('#br-nexus-note');
   note.hidden = src !== 'nx';
   const u = S.settings.nexusUser;
@@ -551,13 +557,20 @@ async function nexusSearch(reset) {
   const nx = S.nx, seq = ++nx.seq;
   if (reset) { nx.list = []; nx.total = 0; $('#br-grid').innerHTML = Array.from({ length: 9 }, () => '<div class="skeleton"></div>').join(''); }
   nx.loading = true; $('#br-more').textContent = 'Caut pe Nexus...';
-  const [r, inst] = await Promise.all([window.vp.act('nexusSearch', { q: S.bq, sort: NX_SORT[S.bsort] || 'downloads', offset: nx.list.length, count: 30 }), reset ? window.vp.act('nexusInstalled') : null]);
+  const [r, inst] = await Promise.all([window.vp.act('nexusSearch', { q: S.bq, sort: NX_SORT[S.bsort] || 'downloads', offset: nx.list.length, count: 30, cat: nx.cat }), reset ? window.vp.act('nexusInstalled') : null]);
   if (seq !== nx.seq) return;
   nx.loading = false;
   if (inst) { nx.installed = inst.installed; nx.pending = inst.pending; }
   if (!r.ok) { nx.error = r.error; $('#br-more').textContent = L(`Nexus nu răspunde: ${r.error}`, `Nexus does not answer: ${r.error}`); if (reset) $('#br-grid').innerHTML = ''; return; }
   nx.error = null; nx.total = r.total; nx.list.push(...r.mods);
+  if (r.cats) { nx.cats = r.cats; buildNexusCats(); }
   renderNexus();
+}
+// Nexus's own categories (Gameplay, Construction, Utilities...), counted for the search text
+function buildNexusCats() {
+  const nx = S.nx, cats = Object.entries(nx.cats || {}).filter(([c, n]) => n > 0 || c === nx.cat);
+  $('#br-cats').innerHTML = !cats.length ? '' : `<button class="chip ${nx.cat ? '' : 'active'}" data-cat="">Toate</button>` +
+    cats.map(([c, n]) => `<button class="chip ${nx.cat === c ? 'active' : ''}" data-cat="${esc(c)}">${esc(c)} <b>${n}</b></button>`).join('');
 }
 function nxButton(m, big) {
   const cls = big ? 'btn' : 'btn small', nx = S.nx;
