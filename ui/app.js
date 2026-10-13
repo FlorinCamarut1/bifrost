@@ -306,10 +306,11 @@ function renderSettings() {
           : 'Lista serverului nu are IP-ul: scrie adresa mai jos (o ai de la admin) sau adminul bifează „Pune și IP-ul în listă”.';
     // (attributes set from code are not seen by the translator)
     $('#dj-addr').placeholder = s.joinAddress ? '' : (s.joinTarget || ((s.lang || 'en') === 'en' ? window.bifrostI18n.t('automat') : 'automat'));
-    $('#jp-state').innerHTML = s.hasJoinPass ? `<span style="color:var(--green)">${L('✓ Parolă salvată (criptat, doar pe PC-ul tău).', '✓ Password saved (encrypted, only on your PC).')}</span>`
+    $('#jp-state').innerHTML = s.joinPassBroken ? `<span style="color:var(--red)">${L('Parola salvată nu se poate citi pe PC-ul ăsta (cheia de criptare s-a schimbat) - scrie-o din nou și apasă Salvează.', 'The saved password cannot be read on this PC (the encryption key changed) - type it again and press Save.')}</span>`
+      : s.hasJoinPass ? `<span style="color:var(--green)">${L('✓ Parolă salvată (criptat, doar pe PC-ul tău).', '✓ Password saved (encrypted, only on your PC).')}</span>`
       : s.listPassword ? `<span style="color:var(--green)">${L('✓ Parola vine din lista serverului - nu trebuie să scrii nimic.', '✓ The password comes from the server\'s list - nothing to type.')}</span>`
       : `<span class="muted">${L('Nicio parolă salvată. Dacă serverul are parolă, scrie-o o dată aici.', 'No password saved. If the server has one, type it here once.')}</span>`;
-    $('#btn-jp-clear').hidden = !s.hasJoinPass;
+    $('#btn-jp-clear').hidden = !s.hasJoinPass && !s.joinPassBroken;
   }
   // restart / new join code only where Bifrost can do them
   $$('[data-act="fixcode"]').forEach(b => { b.hidden = !s.dockerServer; });

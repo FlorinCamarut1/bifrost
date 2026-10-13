@@ -178,7 +178,7 @@ const publicSettings = () => {
       autoPublish: s.autoPublish, publishAddress: s.publishAddress, publishPassword: !!s.publishPassword, hasToken: !!s.tsTokenEnc,
       listPassword: s.role === 'player' && !!manifest?.server?.password,
       canRestart: !!(s.conn && (s.conn.type === 'ssh-docker' || s.conn.restartCmd)), dockerServer: s.conn?.type === 'ssh-docker',
-      directJoin: s.directJoin !== false, joinAddress: s.joinAddress || '', hasJoinPass: !!s.joinPassEnc, joinTarget: joinTarget() } : {}),
+      directJoin: s.directJoin !== false, joinAddress: s.joinAddress || '', hasJoinPass: !!dec(s.joinPassEnc), joinPassBroken: !!s.joinPassEnc && !dec(s.joinPassEnc), joinTarget: joinTarget() } : {}),
   };
 };
 
@@ -721,8 +721,55 @@ async function joinArgs() {
   if (!target) return { args: [], target: null };
   if (!s.joinPassEnc && isAdmin() && transport()?.docker) { try { await detectJoinPassword(s); } catch (e) { log(`server password: ${e.message}`, 'error'); } }
   // a player's own saved password wins; else the one the admin put in the server's list
-  const pw = dec(s.joinPassEnc) || (s.role === 'player' ? String(manifest?.server?.password || '') || null : null);
-  return { args: ['+connect', target, ...(pw ? ['-password', pw] : [])], target, password: !!pw };
+  const own = dec(s.joinPassEnc), listPw = s.role === 'player' ? String(manifest?.server?.password || '') || null : null;
+  const pw = own || listPw;
+  // (a friend's PLAY kept asking for the password, 2026-10-13: say where the password came from, or why there is none)
+  const pwFrom = own ? 'the saved password' : s.joinPassEnc ? null : listPw ? "the server list's password" : null;
+  const why = pw ? null : s.joinPassEnc ? 'the saved password cannot be decrypted on this PC - save it again in Settings' : 'no password saved';
+  if (s.joinPassEnc && !own) log(`Direct join: ${why}${listPw ? " - using the server list's password instead" : ''}`, 'error');
+  return { args: ['+connect', target, ...(pw ? ['-password', pw] : [])], target, password: !!pw, pwFrom: pw ? (pwFrom || "the server list's password") : null, why, pw };
+}
+// Valheim's launch options in Steam (they go on the game's command line too): one per Steam account on this PC
+function steamLaunchOptions(steamDir) {
+  const out = [];
+  try {
+    const base = path.join(steamDir, 'userdata');
+    for (const id of fs.readdirSync(base)) {
+      let t; try { t = fs.readFileSync(path.join(base, id, 'config', 'localconfig.vdf'), 'utf8'); } catch { continue; }
+      // the app's block: "892970" { ... } (nested blocks inside) - LaunchOptions at its first level
+      const at = t.search(/"892970"\s*\{/);
+      if (at < 0) continue;
+      let i = t.indexOf('{', at) + 1, depth = 1, start = i;
+      for (; i < t.length && depth; i++) { if (t[i] === '{') depth++; else if (t[i] === '}') depth--; }
+      const m = t.slice(start, i).match(/^\s*"LaunchOptions"\s*"((?:[^"\\]|\\.)*)"/m);
+      if (m && m[1].trim()) out.push({ account: id, options: m[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\') });
+    }
+  } catch { }
+  return out;
+}
+// after PLAY: did the game get Bifrost's arguments? Valheim logs "JOIN <address>" when it reads +connect, and
+// BepInEx copies the game's log into the profile's LogOutput.log. -password is read silently on the same command line.
+function checkJoinArrived(target, startedAt, withPw) {
+  const file = path.join(getProfile().dir, 'BepInEx', 'LogOutput.log');
+  let tries = 0;
+  const tick = () => {
+    tries++;
+    let text = '', mtime = 0;
+    try { mtime = fs.statSync(file).mtimeMs; if (mtime > startedAt) text = fs.readFileSync(file, 'utf8'); } catch { }
+    if (text.includes(`JOIN ${target}`)) { log(`Direct join: the game got the server address${withPw ? ' and the password' : ''} from Bifrost`, 'done'); return; }
+    // already connecting (Valheim logs "Connecting to server with ...") without a JOIN before it: joined by hand
+    if (/Connecting to server with/.test(text)) {
+      log(`Direct join: the game started WITHOUT Bifrost's address and password (its log has no "JOIN ${target}") - Steam did not pass them on. Check Valheim's Launch Options in Steam, and whether Steam asked to allow the launch arguments.`, 'error');
+      return;
+    }
+    if (tries >= 36) {   // ~6 minutes
+      log(text ? `Direct join: could not tell whether the game got the address - no "JOIN ${target}" in its log yet, and it has not connected anywhere`
+        : 'Direct join: could not check - the game did not write its BepInEx log (was it started with this profile?)', 'error');
+      return;
+    }
+    setTimeout(tick, 10000);
+  };
+  setTimeout(tick, 20000);
 }
 async function launchGame() {
   if (gameState.launching) throw new Error('Valheim pornește deja - așteaptă câteva secunde.');
@@ -736,9 +783,17 @@ async function launchGame() {
     try { guardConfigs(); } catch (e) { log(`config guard: ${e.message}`, 'error'); }
     getProfile().prepareGame(game.game);
     var join = await joinArgs();
+    var startedAt = Date.now();
     await getProfile().launch(game, join.args);
   } catch (e) { gameState.launching = false; sendGame(); throw e; }
-  log(`Starting Valheim with the "${srv().name}" profile (${game.game})${join.target ? ` - joining ${join.target} directly${join.password ? ' with the saved password' : ''}` : ''}`, 'done');
+  log(`Starting Valheim with the "${srv().name}" profile (${game.game})${join.target ? ` - joining ${join.target} directly ${join.password ? `with ${join.pwFrom}` : `without a password (${join.why})`}` : ''}`, 'done');
+  if (join.target) {
+    const shown = join.args.map(a => join.pw && a === join.pw ? '***' : a).join(' ');
+    log(`  steam.exe -applaunch 892970 ... ${shown}`, 'out');
+    if (join.pw && /[\s"'%^&|<>]/.test(join.pw)) log('  the password has a space or a special character - Steam may split or change it on the way to the game', 'error');
+    for (const o of steamLaunchOptions(game.steam || '')) log(`  Valheim's Launch Options in Steam (account ${o.account}): ${o.options.replace(/(-password\s+)\S+/i, '$1***')}`, 'out');
+    checkJoinArrived(join.target, startedAt, join.password);
+  }
   if (join.target) toast(`Pick the character and press Start - you go straight to the server${join.password ? '' : ' (no saved password: type it in the game if the server has one)'}.`, 'ok');
   else if (srv().directJoin !== false && (status.joinCode || manifest?.server?.joinCode)) {
     const code = status.joinCode || manifest.server.joinCode;
