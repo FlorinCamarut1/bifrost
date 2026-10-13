@@ -1074,9 +1074,22 @@ let twoWayBusy = false;
 // of the mod's DLLs; with several candidates, the package whose name shares most words with it
 async function configOwners(rels) {
   const pr = getProfile(), best = new Map();
-  const names = rels.map(r => {
+  // [BepInPlugin(guid, name, version)] is stored as length-prefixed strings one after the other: the DLL with
+  // "<guid><name>" declares the plugin, others only mention the GUID (soft dependencies, compatibility code -
+  // PlanBuild names aedenthorn.CraftFromContainers)
+  const ser = s => { const b = Buffer.from(s, 'utf8'); return b.length < 128 ? Buffer.concat([Buffer.from([b.length]), b]) : null; };
+  const decl = [];
+  const names = rels.map((r, i) => {
     if (/\.cfg$/i.test(r) && !r.includes('/')) {
-      try { const g = (fs.readFileSync(path.join(configDir(), r), 'utf8').slice(0, 600).match(/^## Plugin GUID: (.+)$/m) || [])[1]; if (g && g.trim().length >= 4) return g.trim(); } catch { }
+      try {
+        const head = fs.readFileSync(path.join(configDir(), r), 'utf8').slice(0, 600);
+        const g = ((head.match(/^## Plugin GUID: (.+)$/m) || [])[1] || '').trim();
+        const n = ((head.match(/^## Settings file was created by plugin (.+) v\S+\s*$/m) || [])[1] || '').trim();
+        if (g.length >= 4) {
+          if (n && ser(g) && ser(n)) decl[i] = Buffer.concat([ser(g), ser(n)]);
+          return g;
+        }
+      } catch { }
     }
     return r.split('/')[0].replace(/\.(cfg|ya?ml|json|txt)$/i, '');
   });
@@ -1088,7 +1101,7 @@ async function configOwners(rels) {
       if (!md.length) continue;
       rels.forEach((r, i) => {
         if (names[i].length < 4 || md.indexOf(names[i], 0, 'latin1') < 0) return;
-        const score = tokens[i].filter(t => k.toLowerCase().includes(t)).length;
+        const score = tokens[i].filter(t => k.toLowerCase().includes(t)).length + (decl[i] && md.indexOf(decl[i]) >= 0 ? 100 : 0);
         if (!best.has(r) || score > best.get(r).score) best.set(r, { key: k, score });
       });
       await new Promise(res => setImmediate(res));
@@ -1115,7 +1128,7 @@ function configRels() {
   // .cfg files first (the mod's main settings), then the rest by name
   try { return walk(configDir()).filter(r => safeRel(r) && !CFG_SKIP.some(x => x.test(r))).sort((a, b) => (/\.cfg$/i.test(b) - /\.cfg$/i.test(a)) || a.localeCompare(b)); } catch { return []; }
 }
-function configSig(rels) { const pr = getProfile(); return JSON.stringify([srv()?.id, Object.entries(pr.packages).map(([k, p]) => `${k}@${p.ver}`).sort(), rels]); }
+function configSig(rels) { const pr = getProfile(); return JSON.stringify([2, srv()?.id, Object.entries(pr.packages).map(([k, p]) => `${k}@${p.ver}`).sort(), rels]); }
 // kept on disk too: it only changes when mods or config files do
 const cfgIndexFile = () => path.join(serverDir(srv().id), 'config-owners.json');
 async function configIndex() {
