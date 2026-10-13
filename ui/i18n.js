@@ -61,7 +61,7 @@
     'manual · leagă de Nexus': 'manual · link to Nexus', 'modpack-ul tău': 'your modpack', 'se actualizează...': 'updating...', 'Niciun mod aici.': 'No mods here.',
     // ---- browse ----
     'Descoperă moduri': 'Discover mods', 'Catalogul Thunderstore pentru Valheim': 'The Thunderstore catalog for Valheim', 'Thunderstore': 'Thunderstore', 'Nexus Mods': 'Nexus Mods',
-    'Cele mai descărcate': 'Most downloaded', 'Cele mai apreciate': 'Top rated', 'Actualizate recent': 'Recently updated', 'Cele mai noi': 'Newest', 'Modpack-uri': 'Modpacks',
+    'Cele mai descărcate': 'Most downloaded', 'Cele mai apreciate': 'Top rated', 'Actualizate recent': 'Recently updated', 'Cele mai noi': 'Newest', 'Modpack-uri': 'Modpacks', 'Moduri marcate deprecated pe Thunderstore (încă instalabile, de ex. AzuExtendedPlayerInventory)': 'Mods marked deprecated on Thunderstore (still installable, e.g. AzuExtendedPlayerInventory)',
     'Caută în Thunderstore...': 'Search Thunderstore...', 'Caută pe Nexus Mods...': 'Search Nexus Mods...', '✓ Instalat': '✓ Installed', 'Se instalează': 'Installing',
     'Aștept click pe Nexus': 'Waiting for the Nexus click', 'Nimic găsit.': 'Nothing found.', 'Pe Thunderstore ↗': 'On Thunderstore ↗', 'Pe Nexus ↗': 'On Nexus ↗',
     'Descriere': 'Description', 'Fișiere': 'Files', 'Categorii': 'Categories', 'descărcări': 'downloads', 'aprecieri': 'ratings', 'Caut pe Nexus...': 'Searching Nexus...',

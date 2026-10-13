@@ -1121,7 +1121,13 @@ async function configOwners(rels) {
   rels.forEach((r, i) => {
     if (best.has(r)) return;
     const hit = pk.filter(x => norm(names[i]).includes(x.n));
-    if (hit.length === 1) best.set(r, { key: hit[0].k, score: 0 });
+    if (hit.length === 1) { best.set(r, { key: hit[0].k, score: 0 }); return; }
+    // the author and the mod name both in the path: TherzieTranslations/Armory/Armory.English.yml -> Therzie-Armory
+    const p = norm(r), by = Object.keys(pr.packages).filter(k => {
+      const a = norm(k.slice(0, k.indexOf('-'))), n = norm(k.slice(k.indexOf('-') + 1));
+      return a.length >= 4 && n.length >= 4 && p.includes(a) && p.includes(n);
+    });
+    if (by.length === 1) best.set(r, { key: by[0], score: 0 });
   });
   return new Map([...best].map(([r, b]) => [r, b.key]));
 }
@@ -1136,7 +1142,7 @@ function configRels() {
   // .cfg files first (the mod's main settings), then the rest by name
   try { return walk(configDir()).filter(r => safeRel(r) && !CFG_SKIP.some(x => x.test(r))).sort((a, b) => (/\.cfg$/i.test(b) - /\.cfg$/i.test(a)) || a.localeCompare(b)); } catch { return []; }
 }
-function configSig(rels) { const pr = getProfile(); return JSON.stringify([2, srv()?.id, Object.entries(pr.packages).map(([k, p]) => `${k}@${p.ver}`).sort(), rels]); }
+function configSig(rels) { const pr = getProfile(); return JSON.stringify([3, srv()?.id, Object.entries(pr.packages).map(([k, p]) => `${k}@${p.ver}`).sort(), rels]); }
 // kept on disk too: it only changes when mods or config files do
 const cfgIndexFile = () => path.join(serverDir(srv().id), 'config-owners.json');
 async function configIndex() {

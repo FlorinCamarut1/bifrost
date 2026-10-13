@@ -7,7 +7,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const S = { settings: {}, profile: { mods: [] }, status: {}, job: null, watch: {}, updates: {}, modpack: {}, filter: 'all', search: '',
   player: null, list: {}, appUpdate: null,
   src: 'ts', nx: { list: [], total: 0, loading: false, error: null, installed: {}, pending: {}, seq: 0 },
-  installing: {}, catalog: null, catalogBusy: false, catalogFetched: null, bq: '', bsort: 'dl', bcat: null, bpacks: false, blimit: 60, drawer: null };
+  installing: {}, catalog: null, catalogBusy: false, catalogFetched: null, bq: '', bsort: 'dl', bcat: null, bpacks: false, bdep: false, blimit: 60, drawer: null };
 
 // ---------- helpers ----------
 const ago = t => {
@@ -456,7 +456,7 @@ function pkButton(p, big) {
 function sideTags(p) {
   const c = p.cats || [];
   return [c.includes('Server-side') ? '<span class="side-tag srv">server</span>' : '', c.includes('Client-side') ? '<span class="side-tag">client</span>' : '',
-    p.deprecated ? '<span class="side-tag dep" title="Marked deprecated on Thunderstore - shown only when you search for it">deprecated</span>' : ''].join('');
+    p.deprecated ? '<span class="side-tag dep" title="Marked deprecated on Thunderstore - shown while the Deprecated switch is on">deprecated</span>' : ''].join('');
 }
 
 async function loadCatalog(force) {
@@ -475,7 +475,7 @@ async function loadCatalog(force) {
 }
 function buildCats() {
   const count = {};
-  for (const p of S.catalog) if (!isPack(p)) for (const c of p.cats || []) count[c] = (count[c] || 0) + 1;
+  for (const p of S.catalog) if (!isPack(p) && (!p.deprecated || S.bdep)) for (const c of p.cats || []) count[c] = (count[c] || 0) + 1;
   const cats = Object.entries(count).filter(([c]) => !/Update$|^Mods$|^Modpacks$/.test(c)).sort((a, b) => b[1] - a[1]).slice(0, 18);
   $('#br-cats').innerHTML = `<button class="chip ${S.bcat ? '' : 'active'}" data-cat="">Toate</button>` +
     cats.map(([c, n]) => `<button class="chip ${S.bcat === c ? 'active' : ''}" data-cat="${esc(c)}">${esc(c)} <b>${n}</b></button>`).join('');
@@ -488,7 +488,7 @@ function renderBrowseSub() {
 }
 function browseList() {
   const q = S.bq.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  let list = S.catalog.filter(p => (S.bpacks || !isPack(p)) && (!S.bcat || (p.cats || []).includes(S.bcat)) && (!p.deprecated || q.length) && q.every(w => p.hay.includes(w)));
+  let list = S.catalog.filter(p => (S.bpacks || !isPack(p)) && (!S.bcat || (p.cats || []).includes(S.bcat)) && (!p.deprecated || S.bdep) && q.every(w => p.hay.includes(w)));
   const key = { dl: p => p.dl, rating: p => p.rating, updated: p => p.updated, created: p => p.created }[S.bsort];
   list.sort((a, b) => !!a.deprecated - !!b.deprecated || key(b) - key(a));   // deprecated ones after the rest
   if (q.length) {   // exact name hits first
@@ -526,6 +526,7 @@ let bTimer = null;
 $('#br-search').addEventListener('input', e => { S.bq = e.target.value; clearTimeout(bTimer); bTimer = setTimeout(() => renderBrowse(true), S.src === 'nx' ? 400 : 150); });
 $('#br-sort').addEventListener('change', e => { S.bsort = e.target.value; renderBrowse(true); });
 $('#br-packs').addEventListener('change', e => { S.bpacks = e.target.checked; renderBrowse(true); });
+$('#br-dep').addEventListener('change', e => { S.bdep = e.target.checked; buildCats(); renderBrowse(true); });
 $('#br-cats').addEventListener('click', e => { const c = e.target.closest('[data-cat]'); if (!c) return; S.bcat = c.dataset.cat || null; buildCats(); renderBrowse(true); });
 $('#btn-catalog').onclick = () => S.src === 'nx' ? nexusSearch(true) : loadCatalog(true);
 
@@ -534,7 +535,7 @@ const NX_SORT = { dl: 'downloads', rating: 'endorsements', updated: 'updatedAt',
 function setSource(src) {
   S.src = src;
   $$('#br-source button').forEach(b => b.classList.toggle('on', b.dataset.src === src));
-  $('#br-cats').hidden = src === 'nx'; $('#br-packs-wrap').hidden = src === 'nx';
+  $('#br-cats').hidden = src === 'nx'; $('#br-packs-wrap').hidden = src === 'nx'; $('#br-dep-wrap').hidden = src === 'nx';
   $('#br-search').placeholder = src === 'nx' ? 'Caută pe Nexus Mods...' : 'Caută în Thunderstore...';
   const note = $('#br-nexus-note');
   note.hidden = src !== 'nx';
@@ -749,7 +750,7 @@ function renderConfig() {
     <div class="cfg-head"><h2>${esc(CFG.title)}</h2><div class="muted">${f?.parsed?.plugin ? `<span class="no-i18n">${esc(f.parsed.plugin)}</span> · ` : ''}<span>${dest}</span></div></div>
     ${files}
     ${S.settings?.isAdmin && CFG.rel && /\.cfg$/i.test(CFG.rel) && !CFG.err ? `<label class="cfg-share"><div><b>${L('Și prietenii primesc setările din fișierul ăsta', 'Players get the settings of this file too')}</b><small>${L('Ce ai schimbat față de valorile implicite ajunge și în configul lor, la JOACĂ. Pentru setările pe care serverul nu le trimite (de ex. timpul de îmblânzire: îl calculează jocul jucătorului de lângă animal).', 'What you changed from the defaults reaches their config too, on PLAY. For settings the server does not send (e.g. taming time: the game of the player next to the animal works it out).')}</small></div><span class="switch"><input type="checkbox" id="cfg-share" ${(S.settings.server?.sharedConfigs || []).includes(CFG.rel) ? 'checked' : ''}><span></span></span></label>` : ''}
-    ${CFG.key === '' && CFG.rel ? `<div class="cfg-orphan"><span class="muted small">${L('Niciun mod instalat nu folosește fișierul ăsta (rămas de la un mod dezinstalat?).', 'No installed mod uses this file (left from an uninstalled mod?).')}</span><button class="btn small danger" id="cfg-delete">${L('Șterge fișierul', 'Delete the file')}</button></div>` : ''}
+    ${CFG.key === '' && CFG.rel ? `<div class="cfg-orphan"><span class="muted small">${L('Niciun mod instalat nu folosește fișierul ăsta (rămas de la un mod dezinstalat?).', 'No installed mod uses this file (left from an uninstalled mod?).')}</span><div class="row gap"><button class="btn small danger" id="cfg-delete">${L('Șterge fișierul', 'Delete the file')}</button>${CFG.files.length > 1 ? `<button class="btn small danger" id="cfg-delete-all">${L(`Șterge toate (${CFG.files.length})`, `Delete all (${CFG.files.length})`)}</button>` : ''}</div></div>` : ''}
     <div class="cfg-tools">${f?.parsed && !CFG.raw ? `<input class="txt" id="cfg-q" placeholder="Caută o setare..." value="${esc(CFG.q)}">` : `<span class="muted small no-i18n">${esc(CFG.rel || '')}</span>`}
       ${f?.parsed && !CFG.raw ? `<button class="btn small ghost" id="cfg-defaults" title="${L('Pune toate setările din fișierul ăsta la valorile implicite ale modului. Se aplică după Salvează.', 'Set every setting in this file to its default value. Applied when you press Save.')}">${L('Valori implicite', 'Restore defaults')}</button>` : ''}
       ${f?.parsed ? `<div class="seg" id="cfg-mode"><button class="${CFG.raw ? '' : 'on server'}" data-mode="form">Setări</button><button class="${CFG.raw ? 'on server' : ''}" data-mode="raw">Text</button></div>` : ''}</div>
@@ -873,6 +874,14 @@ $('#drawer-body').addEventListener('click', async e => {
   }
   if (e.target.closest('#cfg-discard')) { Object.assign(CFG, { rawText: null, changes: new Map() }); renderConfig(); return; }
   if (e.target.closest('#cfg-save')) { saveConfig(); return; }
+  if (e.target.closest('#cfg-delete-all')) {
+    const rels = CFG.files.map(f => f.rel), list = rels.slice(0, 8).join('\n') + (rels.length > 8 ? L(`\n... și încă ${rels.length - 8}`, `\n... and ${rels.length - 8} more`) : '');
+    if (!await confirmBox(L(`Ștergi toate cele ${rels.length} fișiere?`, `Delete all ${rels.length} files?`), L(`${list}\nDispar din profil și de pe server. Niciun mod instalat nu le folosește; un mod care totuși are nevoie de unul îl scrie din nou cu valorile implicite.`, `${list}\nThey are removed from the profile and from the server. No installed mod uses them; a mod that still needs one writes it again with its defaults.`), L('Șterge toate', 'Delete all'))) return;
+    const d = await window.vp.act('deleteConfigs', rels);
+    toast(d.ok ? L(`${d.deleted} fișiere șterse${d.remote ? ' (și de pe server)' : ''}.`, `${d.deleted} files deleted${d.remote ? ' (from the server too)' : ''}.`) : d.error, d.ok ? 'ok' : 'error');
+    if (d.ok) { CFG.changes = new Map(); CFG.rawText = null; openConfigDrawer('', CFG.title); }
+    return;
+  }
   if (e.target.closest('#cfg-delete')) {
     const rel = CFG.rel;
     if (!await confirmBox(L('Ștergi fișierul?', 'Delete the file?'), L(`${rel}\nDispare din profil și de pe server. Unele fișiere de aici (de ex. traducerile Therzie) sunt totuși folosite de moduri - șterge doar ce știi că e rămas.`, `${rel}\nIt is removed from the profile and from the server. Some files here (e.g. Therzie's translations) are still used by mods - delete only what you know is left over.`), L('Șterge', 'Delete'))) return;
