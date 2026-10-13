@@ -804,6 +804,8 @@ async function saveConfig() {
     : r.later ? '<span>Salvat. Ajunge pe server imediat ce termin ce lucrez acum.</span>'
       : r.error ? `<span>Salvat în profil, dar nu l-am putut trimite pe server: ${esc(r.error)}</span>`
         : r.unchanged ? '<span class="muted">Nimic de salvat.</span>' : '<span>Salvat în profil.</span>';
+  // (inside the message's own span: the restart button stays next to it)
+  if (!r.unchanged && r.gameRunning) CFG.after = CFG.after.replace('</span>', `<br><small class="muted">${L('Valheim e pornit pe PC: jocul tău folosește noile valori după ce îl repornești. Când îl închizi își scrie setările vechi peste fișier - Bifrost îți pune modificarea la loc.', 'Valheim is running on this PC: your game uses the new values after you restart it. When it closes it writes its old settings over the file - Bifrost puts your edit back.')}</small></span>`);
   const keepQ = CFG.q, open = $$('#cfg-body .cfg-sec').filter(d => d.open).map(d => d.dataset.sec), wasRaw = CFG.raw;
   await loadConfigFile(CFG.rel, true);
   if (wasRaw && CFG.file?.parsed && !CFG.raw) { CFG.raw = true; renderConfig(); }

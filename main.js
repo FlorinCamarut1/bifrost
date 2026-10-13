@@ -679,6 +679,7 @@ function playerInfo() {
 }
 // is Valheim running? (one game at a time: a second PLAY must not start another copy)
 const gameState = { running: false, launching: false };
+let gameChecked = false;
 function sendGame() { send('game', gameState); updateTray(); }
 function checkGameProcess() {
   const [cmd, args, re] = LINUX
@@ -686,7 +687,13 @@ function checkGameProcess() {
     : ['tasklist', ['/FI', 'IMAGENAME eq valheim.exe', '/NH', '/FO', 'CSV'], /"valheim\.exe"/i];
   return new Promise(resolve => execFile(cmd, args, { windowsHide: true }, (e, out) => {
     const running = !e && re.test(out || '');
-    if (running !== gameState.running) { gameState.running = running; if (running) gameState.launching = false; sendGame(); }
+    if (running !== gameState.running) {
+      gameState.running = running; if (running) gameState.launching = false; sendGame();
+      // it closed: it may have just saved its old settings over edits; it started: it loaded the files as they are
+      // (the first check after Bifrost starts only finds a game that was already running: its edits stay guarded)
+      try { guardConfigs(); if (running && gameChecked) dropGuards(); } catch (err) { log(`config guard: ${err.message}`, 'error'); }
+    }
+    gameChecked = true;
     resolve(running);
   }));
 }
@@ -726,6 +733,7 @@ async function launchGame() {
   gameState.launching = true; sendGame();
   try {
     try { getProfile().setConsole(G.bepConsoleMode || 'nowarn'); } catch (e) { log(`BepInEx.cfg: ${e.message}`, 'error'); }
+    try { guardConfigs(); } catch (e) { log(`config guard: ${e.message}`, 'error'); }
     getProfile().prepareGame(game.game);
     var join = await joinArgs();
     await getProfile().launch(game, join.args);
@@ -1237,9 +1245,51 @@ function clearPending(rels) {
   if (!rels.length) return;
   const pd = readPending(); for (const r of rels) delete pd[r]; writePending(pd);
 }
+// The same happens on this PC: settings edited while Valheim runs here are written over with the game's old values when
+// it closes (2026-10-13: a ValheimPlus edit made in game was lost when the game closed, and the sync then sent the old
+// file to the server). { rel: { changes: [{ section, key, value }], at } } - put back onto whatever the game wrote,
+// until the game has been started after the edit (then it loaded them).
+const guardFile = () => path.join(serverDir(srv().id), 'config-guard.json');
+function guardConfigs() {
+  if (!srv()) return;
+  const gd = readJson(guardFile(), {}), rels = Object.keys(gd);
+  if (!rels.length) return;
+  let pd = null;
+  for (const rel of rels) {
+    let cur;
+    try { cur = fs.readFileSync(cfgPath(rel), 'utf8'); } catch { delete gd[rel]; continue; }
+    let next;
+    try { next = bepcfg.apply(cur, gd[rel].changes); } catch (e) { log(`Could not put the edit back into ${rel}: ${e.message}`, 'error'); delete gd[rel]; continue; }
+    if (next === cur) continue;
+    fs.writeFileSync(cfgPath(rel) + '.tmp', next); fs.renameSync(cfgPath(rel) + '.tmp', cfgPath(rel));
+    log(`Valheim on this PC wrote its old settings over ${rel} - put your edit back (${gd[rel].changes.map(c => `${c.key} = ${c.value}`).join(', ').slice(0, 300)})`, 'out');
+    // the server still has to get it: the edited version is the one waiting for a restart there
+    pd = pd || readPending();
+    if (pd[rel]) pd[rel].sha = normSha(Buffer.from(next));
+  }
+  if (pd) writePending(pd);
+  writeJson(guardFile(), gd);
+}
+function dropGuards() { if (srv()) try { fs.rmSync(guardFile(), { force: true }); } catch { } }
+function guardEdit(rel, cur, next, changes) {
+  if (!/\.cfg$/i.test(rel)) return;
+  // a text edit: the values that differ between the two versions
+  if (!changes) {
+    const vals = t => new Map(bepcfg.parse(t).sections.flatMap(s => s.entries.map(e => [`${s.name}\u0000${e.key}`, e.value])));
+    const a = vals(cur);
+    changes = [...vals(next)].filter(([k, v]) => a.get(k) !== v).map(([k, v]) => { const [section, key] = k.split('\u0000'); return { section, key, value: v }; });
+  }
+  if (!changes.length) return;
+  const gd = readJson(guardFile(), {}), old = gd[rel]?.changes || [];
+  const all = new Map(old.concat(changes.map(({ section, key, value }) => ({ section, key, value }))).map(c => [`${c.section}\u0000${c.key}`, c]));
+  gd[rel] = { changes: [...all.values()], at: Date.now() };
+  writeJson(guardFile(), gd);
+}
+
 // before the game (re)starts: stop it (it saves its old settings now, over the edited files), send the edited configs
 // again while it is down; the start then loads them. Returns the files sent, to clear once the game has started.
 async function sendPendingWhileStopped(tr) {
+  try { guardConfigs(); } catch (e) { log(`config guard: ${e.message}`, 'error'); }
   const s = srv(), pd = readPending(), rels = Object.keys(pd);
   if (!rels.length || !isAdmin() || !s.syncConfigs || !tr?.docker || typeof tr.stopGame !== 'function') return [];
   const files = rels.map(rel => {
@@ -1270,24 +1320,28 @@ async function saveConfig({ rel, changes, text, expect }) {
   }
   fs.writeFileSync(p + '.tmp', next); fs.renameSync(p + '.tmp', p);
   log(`Config edited: ${rel}${changes ? ` (${changes.map(c => `${c.key} = ${c.value}`).join(', ').slice(0, 300)})` : ''}`, 'done');
+  const gameOn = await checkGameProcess().catch(() => false);
+  if (gameOn) try { guardEdit(rel, cur, next, changes); } catch (e) { log(`config guard: ${e.message}`, 'error'); }
   const s = srv();
   if (isAdmin() && (s.sharedConfigs || []).includes(rel)) schedulePublish('shared settings');
-  if (!isAdmin() || !s.conn || !s.syncConfigs) return { ok: true, pushed: false, local: true, hash: sha1(next) };
+  if (!isAdmin() || !s.conn || !s.syncConfigs) return { ok: true, pushed: false, local: true, hash: sha1(next), gameRunning: gameOn };
   { const pd = readPending(); pd[rel] = { sha: normSha(Buffer.from(next)), at: Date.now() }; writePending(pd); }
   // straight to the server (the config sync sees the local change); a job in progress -> it goes right after
   for (let i = 0; i < 30 && (twoWayBusy || job); i++) await new Promise(r => setTimeout(r, 500));
-  if (twoWayBusy || job) return { ok: true, pushed: false, later: true, hash: sha1(next) };
+  // (a server restart in progress: the config sync runs right after it)
+  if (twoWayBusy || job || restarting) return { ok: true, pushed: false, later: true, hash: sha1(next), gameRunning: gameOn };
   await twoWay('config edited');
   const tw = watch.twoWay || {};
-  if (tw.error) return { ok: true, pushed: false, error: tw.error, hash: sha1(next) };
+  if (tw.error) return { ok: true, pushed: false, error: tw.error, hash: sha1(next), gameRunning: gameOn };
   // never report "sent" for something the sync replaced
   let now = null; try { now = fs.readFileSync(p, 'utf8'); } catch { }
   if (now !== next) return { ok: false, error: 'Sincronizarea a adus între timp altă versiune a fișierului de pe server - l-am reîncărcat, fă modificarea din nou.' };
-  return { ok: true, pushed: true, canRestart: !!transport()?.canRestart, hash: sha1(next) };
+  return { ok: true, pushed: true, canRestart: !!transport()?.canRestart, hash: sha1(next), gameRunning: gameOn };
 }
 async function twoWay(reason) {
   const s = srv();
   if (!isAdmin() || !s.conn || twoWayBusy || job || restarting || !(s.syncConfigs || s.pullServerMods)) return;
+  try { guardConfigs(); } catch (e) { log(`config guard: ${e.message}`, 'error'); }
   twoWayBusy = true;
   const tr = transport(), pr = getProfile(), res = { at: Date.now(), push: 0, pull: 0, mods: [], error: null };
   try {
