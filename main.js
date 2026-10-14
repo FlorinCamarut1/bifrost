@@ -31,7 +31,7 @@ app.commandLine.appendSwitch('disk-cache-size', String(100 * 1024 * 1024));
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
-const { Profile, BEPINEX, cmpVer, parseDep } = require('./lib/profile');
+const { Profile, BEPINEX, EML, cmpVer, parseDep } = require('./lib/profile');
 const { Nexus } = require('./lib/nexus');
 const { build: buildServerList } = require('./lib/manifest');
 const listhost = require('./lib/listhost');
@@ -47,6 +47,7 @@ const tsprofile = require('./lib/tsprofile');
 const importers = require('./lib/importers');
 const codeupdate = require('./lib/codeupdate');
 const { run7z } = require('./lib/archive');
+const games = require('./lib/games');
 
 const APP_ID = 'io.github.florincamarut1.bifrost';
 const REPO = 'FlorinCamarut1/bifrost';
@@ -77,11 +78,12 @@ const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true })
 const slug = s => String(s || 'server').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'server';
 
 const GLOBAL_DEFAULTS = {
-  lang: null, notifications: true, startWithWindows: null, gameDir: null, shortcutsV2: false, bepConsoleMode: 'nowarn',
+  // gameDir: Valheim's folder (from before other games); gameDirs: { <game id>: folder } for the others
+  lang: null, notifications: true, startWithWindows: null, gameDir: null, gameDirs: {}, shortcutsV2: false, bepConsoleMode: 'nowarn',
   nexusKeyEnc: null, nexusUser: null, githubTokenEnc: null, githubUser: null, activeServer: null, servers: [], shortcutTarget: null,
 };
 const SERVER_DEFAULTS = {
-  id: '', name: 'Server', role: 'player', list: null, profileDir: null, createdAt: 0,
+  id: '', name: 'Server', role: 'player', list: null, profileDir: null, createdAt: 0, game: 'valheim',   // lib/games.js
   // admin
   conn: null, connSecretEnc: null, world: '', addresses: '', builtin: 'BepInExPack',
   autoSync: true, quietSeconds: 8, retryMinutes: 5, syncConfigs: true, syncAllMods: true, pullServerMods: true,
@@ -153,6 +155,10 @@ saveSettings();
 
 const srv = () => G.servers.find(s => s.id === G.activeServer) || null;
 const isAdmin = () => srv()?.role === 'admin';
+// the game of a server (lib/games.js); Valheim when there is no server yet
+const gdef = (s = srv()) => games.game(s?.game);
+const isValheim = (s = srv()) => gdef(s).id === 'valheim';
+const gameDirSetting = (g = gdef()) => g.id === 'valheim' ? G.gameDir : G.gameDirs?.[g.id] || null;
 const enc = s => safeStorage.encryptString(String(s).trim()).toString('base64');
 const dec = s => { try { return s ? safeStorage.decryptString(Buffer.from(s, 'base64')) : null; } catch { return null; } };
 const LOG_FILE = path.join(DATA, 'bifrost.log');
@@ -170,14 +176,18 @@ const publicSettings = () => {
   const s = srv();
   return {
     ...g, lang: G.lang || 'en', hasNexusKey: !!nexusKeyEnc, hasGithubToken: !!githubTokenEnc, githubLogin: !!GITHUB_CLIENT_ID,
-    servers: servers.map(x => ({ id: x.id, name: x.name, role: x.role })), server: publicServer(s),
+    servers: servers.map(x => ({ id: x.id, name: x.name, role: x.role, game: gdef(x).id })), server: publicServer(s),
     isAdmin: isAdmin(), ownSource: isAdmin(), packaged: app.isPackaged, version: OWN_VERSION,
+    // what the UI shows for this server's game (Thunderstore tab, configs, join code, modpack only where they exist)
+    game: (({ id, name, loader, thunderstore, configs, exe, nexus }) => ({ id, name, loader, thunderstore, configs, exe: exe[0], nexusDomain: nexus.domain, outdated: !!nexus.outdatedBefore }))(gdef()),
+    games: Object.values(games.GAMES).map(x => ({ id: x.id, name: x.name })), gameDir: gameDirSetting(),
     // flat aliases the UI reads
     ...(s ? { role: s.role, serverName: s.name, serverWorld: s.world, addresses: s.addresses, autoSync: s.autoSync, quietSeconds: s.quietSeconds,
       retryMinutes: s.retryMinutes, syncConfigs: s.syncConfigs, syncAllMods: s.syncAllMods, pullServerMods: s.pullServerMods,
       autoPublish: s.autoPublish, publishAddress: s.publishAddress, publishPassword: !!s.publishPassword, hasToken: !!s.tsTokenEnc,
       listPassword: s.role === 'player' && !!manifest?.server?.password,
-      canRestart: !!(s.conn && (s.conn.type === 'ssh-docker' || s.conn.restartCmd)), dockerServer: s.conn?.type === 'ssh-docker',
+      // dockerServer = the valheim-server image (join codes, server settings); other games' containers only restart
+      canRestart: !!(s.conn && (s.conn.type === 'ssh-docker' || s.conn.restartCmd)), dockerServer: s.conn?.type === 'ssh-docker' && isValheim(s),
       directJoin: s.directJoin !== false, joinAddress: s.joinAddress || '', hasJoinPass: !!dec(s.joinPassEnc), joinPassBroken: !!s.joinPassEnc && !dec(s.joinPassEnc), joinTarget: joinTarget() } : {}),
   };
 };
@@ -413,10 +423,11 @@ let profile = null, profileFor = null;
 function getProfile() {
   const s = srv();
   const dir = s?.profileDir || path.join(DATA, 'profiles', s?.id || 'none');
-  if (!profile || profileFor !== dir) { profile = new Profile({ dir, cacheDir: path.join(DATA, 'cache'), fetch: fetchN, log }); profileFor = dir; }
+  if (!profile || profileFor !== dir) { profile = new Profile({ dir, cacheDir: path.join(DATA, 'cache'), fetch: fetchN, log, game: gdef(s) }); profileFor = dir; }
   return profile;
 }
-const pluginsDir = () => path.join(getProfile().dir, 'BepInEx', 'plugins');
+// the folder with one entry per mod: BepInEx/plugins (Valheim), mods (Enshrouded / EML)
+const pluginsDir = () => path.join(getProfile().dir, ...gdef().modsDir.split('/'));
 const configDir = () => path.join(getProfile().dir, 'BepInEx', 'config');
 const statePath = () => path.join(serverDir(srv().id), 'state.json');
 function readState() { const j = srv() ? readJson(statePath(), {}) : {}; return { mods: j.mods || {}, installed: j.installed || [], restartPending: !!j.restartPending, uploaded: j.uploaded || {} }; }
@@ -502,7 +513,7 @@ async function checkUpdates(maxAgeMs = 0) {
 // =====================================================================================================
 // INSTALLING (Thunderstore + Nexus) into the current server's profile
 // =====================================================================================================
-const nexus = new Nexus({ fetch: fetchN, appName: 'Bifrost', appVersion: OWN_VERSION });
+const nexus = new Nexus({ fetch: fetchN, appName: 'Bifrost', appVersion: OWN_VERSION, game: gdef().nexus });
 const installing = {};
 let nexusWaiting = [];
 // PLAY that stopped for Nexus files (free account: one click per file on the site) starts the game by itself once the
@@ -546,8 +557,16 @@ async function installNexus(entry, nxm) {
   const zip = await pr.download(url, path.join(pr.cacheDir, 'nexus', `${entry.modId}-${entry.fileId}-${name}`), (got, total) => setProgress({ ...progress, bytes: got, totalBytes: total }));
   const dllName = `${String(entry.title || entry.key).replace(/[^\w.\-]+/g, '_')}.dll`;
   await pr.installZip(entry.key, zip, { ver: entry.ver, role: entry.role, source: 'nexus', title: entry.title, modId: entry.modId, fileId: entry.fileId, size: fs.statSync(zip).size },
-    Profile.nexusMap(entry.key), dllName);
+    pr.game.loader === 'eml' ? Profile.emlMap(entry.key) : Profile.nexusMap(entry.key), dllName);
   log(`  installed ${entry.title} (Nexus ${entry.modId})`, 'out');
+}
+// EML (Enshrouded Mod Loader) from its GitHub releases: ver = a release tag, or 'latest'
+async function installLoader(ver = 'latest') {
+  const pr = getProfile();
+  setProgress({ ...(progress || { phase: 'install', done: 0, total: 1 }), text: 'EML - Enshrouded Mod Loader', bytes: 0, totalBytes: 0 });
+  const r = await pr.installEml(ver, (got, total) => setProgress({ ...progress, bytes: got, totalBytes: total }));
+  log(`  installed EML ${r.ver}`, 'out');
+  return r;
 }
 const sideFromCats = p => { const c = p?.cats || []; return c.includes('Server-side') ? 'server' : c.includes('Client-side') ? 'client' : null; };
 function hintSide(name, side) {
@@ -588,6 +607,7 @@ function removePackageNow(key) {
   if (!p) return { ok: false, error: 'Nu e instalat.' };
   if (p.role === 'required') return { ok: false, error: 'Serverul are nevoie de el.' };
   if (key === BEPINEX) return { ok: false, error: 'BepInEx e baza tuturor modurilor - nu se scoate.' };
+  if (key === EML) return { ok: false, error: 'EML loads every mod - it stays.' };
   const users = Object.entries(pr.packages).filter(([k, x]) => k !== key && (x.deps || []).some(d => parseDep(d)?.full === key)).map(([k]) => k);
   if (users.length) return { ok: false, error: `Needed by: ${users.join(', ')}. Remove those first.` };
   if (p.role === 'recommended') { const s = srv(); delete s.recommended[key]; delete s.nexusChosen[key]; saveSettings(); }
@@ -649,6 +669,8 @@ function desired() {
   for (const m of manifest.recommended || []) if (s.recommended[m.full]) out.push({ key: m.full, full: m.full, ver: m.ver, role: 'recommended', source: 'thunderstore', title: m.title });
   for (const n of manifest.nexus || []) if (n.required || s.nexusChosen[n.key])
     out.push({ key: n.key, full: n.key, ver: String(n.version || n.fileId), role: n.required ? 'required' : 'recommended', source: 'nexus', title: n.title, modId: n.modId, fileId: n.fileId });
+  // EML games: the loader itself (not on Nexus), the version the admin has
+  if (gdef(s).loader === 'eml') out.unshift({ key: EML, full: EML, ver: manifest.loader?.ver || getProfile().packages[EML]?.ver || 'latest', role: 'required', source: 'github', title: 'EML - Enshrouded Mod Loader' });
   return out.sort((a, b) => (b.full === BEPINEX) - (a.full === BEPINEX));
 }
 function playerMods() {
@@ -667,7 +689,7 @@ function playerInfo() {
   const bytes = plan.install.reduce((t, d) => t + (catalogIndex.get(d.full)?.size || 0), 0);
   return {
     manifest, error: manifestErr, at: manifestAt, role: s.role, progress, busy: !!job, status,
-    game: { ...game, ...(game.game ? Profile.gameOwner(game.game) : {}), backup: !!(game.game && fs.existsSync(path.join(game.game, 'bifrost-backup'))) },
+    game: { ...game, name: gdef().name, ...(game.game ? Profile.gameOwner(game.game, gdef()) : {}), backup: !!(game.game && fs.existsSync(path.join(game.game, 'bifrost-backup'))) },
     plan: { install: plan.install.map(d => ({ key: d.key, ver: d.ver, have: pr.packages[d.key]?.ver || null, source: d.source, title: d.title })), remove: plan.remove, bytes },
     required: manifest ? manifest.required.length + (manifest.nexus || []).filter(n => n.required).length : 0,
     nexusNeeded: (manifest?.nexus || []).filter(n => n.required && !pr.packages[`nexus-${n.modId}`]).map(n => n.title),
@@ -682,9 +704,10 @@ const gameState = { running: false, launching: false };
 let gameChecked = false;
 function sendGame() { send('game', gameState); updateTray(); }
 function checkGameProcess() {
+  const exe = gdef().process, base = exe.replace(/\.exe$/i, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const [cmd, args, re] = LINUX
-    ? ['ps', ['-eo', 'args'], /(^|[\\/\s])valheim\.(x86_64|exe)(\s|$)/im]       // native build or Proton (not valheim_server)
-    : ['tasklist', ['/FI', 'IMAGENAME eq valheim.exe', '/NH', '/FO', 'CSV'], /"valheim\.exe"/i];
+    ? ['ps', ['-eo', 'args'], new RegExp(`(^|[\\\\/\\s])${base}\\.(x86_64|exe)(\\s|$)`, 'im')]       // native build or Proton (not the dedicated server)
+    : ['tasklist', ['/FI', `IMAGENAME eq ${exe}`, '/NH', '/FO', 'CSV'], new RegExp(`"${base}\\.exe"`, 'i')];
   return new Promise(resolve => execFile(cmd, args, { windowsHide: true }, (e, out) => {
     const running = !e && re.test(out || '');
     if (running !== gameState.running) {
@@ -702,14 +725,14 @@ function checkGameProcess() {
 // answers the server's password prompt. (-joincode would skip the character screen but plays the developer test
 // character, so it is not used.)
 function joinTarget(s = srv()) {
-  if (!s) return null;
+  if (!s || !isValheim(s)) return null;   // (only Valheim's command line can join a server)
   const withPort = a => { a = String(a || '').trim(); return !a ? null : /:\d+$/.test(a) ? a : `${a}:2456`; };
   return withPort(s.joinAddress) || withPort(s.role === 'player' ? manifest?.server?.address : status.publicIp);
 }
 // the admin's Docker server knows its own password (SERVER_PASS of the valheim-server image)
 async function detectJoinPassword(s = srv()) {
   const tr = transport(s);
-  if (!tr?.docker) throw new Error('Doar pentru servere Docker (valheim-server) - scrie parola de mână.');
+  if (!tr?.valheimImage) throw new Error('Doar pentru servere Docker (valheim-server) - scrie parola de mână.');
   const pw = String(await tr.run('printf "%s" "$SERVER_PASS"', { timeout: 20000 }) || '').trim();
   s.joinPassEnc = pw ? enc(pw) : null; saveSettings(); send('settings', publicSettings());
   return pw ? { ok: true, found: true } : { ok: true, found: false };
@@ -719,7 +742,7 @@ async function joinArgs() {
   if (s.directJoin === false) return { args: [], target: null };
   const target = joinTarget(s);
   if (!target) return { args: [], target: null };
-  if (!s.joinPassEnc && isAdmin() && transport()?.docker) { try { await detectJoinPassword(s); } catch (e) { log(`server password: ${e.message}`, 'error'); } }
+  if (!s.joinPassEnc && isAdmin() && transport()?.valheimImage) { try { await detectJoinPassword(s); } catch (e) { log(`server password: ${e.message}`, 'error'); } }
   // a player's own saved password wins; else the one the admin put in the server's list
   const own = dec(s.joinPassEnc), listPw = s.role === 'player' ? String(manifest?.server?.password || '') || null : null;
   const pw = own || listPw;
@@ -730,14 +753,14 @@ async function joinArgs() {
   return { args: ['+connect', target, ...(pw ? ['-password', pw] : [])], target, password: !!pw, pwFrom: pw ? (pwFrom || "the server list's password") : null, why, pw };
 }
 // Valheim's launch options in Steam (they go on the game's command line too): one per Steam account on this PC
-function steamLaunchOptions(steamDir) {
+function steamLaunchOptions(steamDir, appId = gdef().appId) {
   const out = [];
   try {
     const base = path.join(steamDir, 'userdata');
     for (const id of fs.readdirSync(base)) {
       let t; try { t = fs.readFileSync(path.join(base, id, 'config', 'localconfig.vdf'), 'utf8'); } catch { continue; }
       // the app's block: "892970" { ... } (nested blocks inside) - LaunchOptions at its first level
-      const at = t.search(/"892970"\s*\{/);
+      const at = t.search(new RegExp(`"${appId}"\\s*\\{`));
       if (at < 0) continue;
       let i = t.indexOf('{', at) + 1, depth = 1, start = i;
       for (; i < t.length && depth; i++) { if (t[i] === '{') depth++; else if (t[i] === '}') depth--; }
@@ -771,22 +794,27 @@ function checkJoinArrived(target, startedAt, withPw) {
   };
   setTimeout(tick, 20000);
 }
+async function findGame() {
+  const g = gdef(), found = await Profile.findGame(g);
+  if (Profile.isGameDir(gameDirSetting(g), g)) found.game = gameDirSetting(g);
+  return found;
+}
 async function launchGame() {
-  if (gameState.launching) throw new Error('Valheim pornește deja - așteaptă câteva secunde.');
-  if (await checkGameProcess()) throw new Error('Valheim rulează deja.');
-  game = await Profile.findGame();
-  if (Profile.isGameDir(G.gameDir)) game.game = G.gameDir;
-  if (!game.game) throw new Error('Nu găsesc Valheim (Steam). Alege folderul jocului în Setări.');
+  const name = gdef().name;
+  if (gameState.launching) throw new Error(`${name} is starting already - wait a few seconds.`);
+  if (await checkGameProcess()) throw new Error(`${name} is running already.`);
+  game = await findGame();
+  if (!game.game) throw new Error(`${name} is not found (Steam). Pick the game's folder in Settings.`);
   gameState.launching = true; sendGame();
   try {
-    try { getProfile().setConsole(G.bepConsoleMode || 'nowarn'); } catch (e) { log(`BepInEx.cfg: ${e.message}`, 'error'); }
+    if (isValheim()) try { getProfile().setConsole(G.bepConsoleMode || 'nowarn'); } catch (e) { log(`BepInEx.cfg: ${e.message}`, 'error'); }
     try { guardConfigs(); } catch (e) { log(`config guard: ${e.message}`, 'error'); }
     getProfile().prepareGame(game.game);
     var join = await joinArgs();
     var startedAt = Date.now();
     await getProfile().launch(game, join.args);
   } catch (e) { gameState.launching = false; sendGame(); throw e; }
-  log(`Starting Valheim with the "${srv().name}" profile (${game.game})${join.target ? ` - joining ${join.target} directly ${join.password ? `with ${join.pwFrom}` : `without a password (${join.why})`}` : ''}`, 'done');
+  log(`Starting ${name} with the "${srv().name}" profile (${game.game})${join.target ? ` - joining ${join.target} directly ${join.password ? `with ${join.pwFrom}` : `without a password (${join.why})`}` : ''}`, 'done');
   if (join.target) {
     const shown = join.args.map(a => join.pw && a === join.pw ? '***' : a).join(' ');
     log(`  steam.exe -applaunch 892970 ... ${shown}`, 'out');
@@ -795,7 +823,7 @@ async function launchGame() {
     checkJoinArrived(join.target, startedAt, join.password);
   }
   if (join.target) toast(`Pick the character and press Start - you go straight to the server${join.password ? '' : ' (no saved password: type it in the game if the server has one)'}.`, 'ok');
-  else if (srv().directJoin !== false && (status.joinCode || manifest?.server?.joinCode)) {
+  else if (isValheim() && srv().directJoin !== false && (status.joinCode || manifest?.server?.joinCode)) {
     const code = status.joinCode || manifest.server.joinCode;
     clipboard.writeText(code);
     toast(`The server's address is not known, so the join code ${code} was copied: in the game Join game → Add server → Ctrl+V.`, 'info');
@@ -848,6 +876,7 @@ async function playerSync({ launch } = {}) {
     const ts = plan.install.filter(d => d.source === 'thunderstore');
     const nx = plan.install.filter(d => d.source === 'nexus');
     setProgress({ phase: 'install', text: '', done: 0, total: plan.install.length });
+    for (const d of plan.install.filter(x => x.source === 'github')) await installLoader(d.ver);
     for (const [i, d] of ts.entries()) { setProgress({ ...progress, done: i }); await installThunderstore(d, wanted); }
     if (nx.length && !G.nexusKeyEnc) {
       setProgress(null);
@@ -880,7 +909,7 @@ async function playerSync({ launch } = {}) {
 // =====================================================================================================
 function transport(s = srv()) {
   if (!s?.conn) return null;
-  return makeTransport(s.conn, dec(s.connSecretEnc));
+  return makeTransport(s.conn, dec(s.connSecretEnc), gdef(s).id);
 }
 function adminMods() {
   const st = readState(), pr = getProfile(), s = srv();
@@ -889,9 +918,9 @@ function adminMods() {
     const c = catalogIndex.get(k);
     return {
       name: k, displayName: (c?.name || x.title || k).replace(/_/g, ' '),
-      author: c?.owner || (x.source === 'nexus' ? 'Nexus' : x.source === 'manual' ? 'instalat manual' : k.split('-')[0]),
-      description: c?.desc || (x.source === 'manual' ? 'Nu e din Thunderstore / Nexus.' : ''), version: x.ver, enabled: true,
-      url: c?.url || (x.modId ? `https://www.nexusmods.com/valheim/mods/${x.modId}` : null), builtin: builtin.test(k),
+      author: c?.owner || (x.source === 'nexus' ? 'Nexus' : x.source === 'manual' ? 'instalat manual' : x.source === 'github' ? 'GitHub' : k.split('-')[0]),
+      description: c?.desc || (x.source === 'manual' ? 'Nu e din Thunderstore / Nexus.' : k === EML ? 'The mod loader: dbghelp.dll next to the game, loads everything in the mods folder.' : ''), version: x.ver, enabled: true,
+      url: c?.url || (x.modId ? `https://www.nexusmods.com/${gdef().nexus.domain}/mods/${x.modId}` : x.source === 'github' && x.repo ? `https://github.com/${x.repo}` : null), builtin: builtin.test(k) || k === EML,
       modpack: !!s.modpackName && k.endsWith(`-${s.modpackName}`), side: st.mods[k] || null, onServer: st.installed.includes(k),
       icon: fs.existsSync(path.join(pluginsDir(), k, 'icon.png')) ? `modicon://icon/${encodeURIComponent(k)}` : (c?.icon || null),
       manual: x.source !== 'thunderstore', role: x.role, source: x.source, size: x.size || 0,
@@ -933,6 +962,40 @@ async function confirmMass(list) {
   return r.response === 1;
 }
 
+// what the mod sync does differently per game: Enshrouded mods carry no ServerSync-like signs, so a new one goes to the
+// server and every player unless the admin marks it client-only; an empty mods folder is a valid server there
+function syncGameOpts() {
+  if (isValheim()) return {};
+  return { guessSide: () => ['server', `${gdef().name}: on the server and for every player - mark it client if it only changes this PC`], allowEmpty: true };
+}
+// EML games: the loader (dbghelp.dll + its files) goes next to the dedicated server's exe; true when something was sent
+let loaderEnvWarned = false;
+async function syncLoader(tr) {
+  if (gdef().loader !== 'eml') return false;
+  if (!tr.serverDir) { log('  EML is not put on the server: the connection has no server folder (where enshrouded_server.exe is)', 'error'); return false; }
+  const pr = getProfile(), files = pr.loaderFiles();
+  if (!files.length) return false;
+  // Wine / Proton only loads the proxy when told to (mornedhels/enshrouded-server: environment WINEDLLOVERRIDES)
+  if (tr.docker && !loaderEnvWarned) {
+    const env = await tr.run('printf "%s" "$WINEDLLOVERRIDES"', { timeout: 20000 }).catch(() => null);
+    if (env !== null && !/dbghelp\s*=\s*n/i.test(env)) {
+      loaderEnvWarned = true;
+      log('  the server container has no WINEDLLOVERRIDES=dbghelp=native,builtin - Wine will not load EML, so the server runs without mods. Add it to the container\'s environment (docker compose) and recreate it.', 'error');
+      notify('Bifrost: EML is not loaded on the server', 'Add WINEDLLOVERRIDES=dbghelp=native,builtin to the container environment.', 'warn');
+    }
+  }
+  const changed = [];
+  for (const f of files) {
+    let remote = null;
+    try { remote = await tr.read(tr.serverDir, f.rel); } catch { }
+    const data = fs.readFileSync(f.abs);
+    if (!remote || !remote.equals(data)) changed.push({ name: f.rel, data });
+  }
+  if (!changed.length) return false;
+  await tr.put(tr.serverDir, changed);
+  log(`  EML put on the server (${changed.map(f => f.name).join(', ')})`, 'out');
+  return true;
+}
 async function syncNow(reason) {
   const s = srv();
   if (!isAdmin() || !s.conn) return;
@@ -952,8 +1015,9 @@ async function syncNow(reason) {
   try {
     const r = await syncMods(st, {
       pluginsDir: pluginsDir(), transport: tr, builtin: new RegExp(s.builtin || 'BepInExPack', 'i'), allMods: s.syncAllMods,
-      confirmMassRemoval: manual ? confirmMass : null, log: l => log(l, 'out'),
+      confirmMassRemoval: manual ? confirmMass : null, log: l => log(l, 'out'), ...syncGameOpts(),
     });
+    if (await syncLoader(tr)) { st.restartPending = true; r.copy.push('EML'); }
     writeState(st);
     for (const n of r.newMods) log(`  ${n.name} -> ${n.side} (${n.why})`, 'out');
     const what = [r.copy.length && `Updated: ${r.copy.join(', ')}`, r.remove.length && `Removed: ${r.remove.join(', ')}`,
@@ -1011,7 +1075,7 @@ async function maybeRestart({ manual, what = '', force } = {}) {
   }
   const r = await restartServer({ fast: !force });
   watch.lastResult = { kind: 'ok', text: r.joinCode ? `Server restarted - join code ${r.joinCode}` : 'Server restarted', what };
-  notify('The Valheim server is updated', `${what}\nRestarted${r.joinCode ? ` - join code ${r.joinCode}` : ''}`.trim());
+  notify(`The ${gdef().name} server is updated`, `${what}\nRestarted${r.joinCode ? ` - join code ${r.joinCode}` : ''}`.trim());
   setWatch('idle', 'la zi');
   pollStatus(); schedulePublish('restart'); setTimeout(() => twoWay('after restart'), 1500);
   return { ok: true, joinCode: r.joinCode };
@@ -1042,7 +1106,7 @@ async function restartServer({ fast, recreate } = {}) {
     if (!quick) await tr.restart();
     clearPending(sent);   // the game started with them
     const st = readState(); st.restartPending = false; writeState(st);
-    if (!tr.docker) { log('■ Server restarted', 'done'); return { ok: true }; }
+    if (!tr.valheimImage) { log('■ Server restarted', 'done'); return { ok: true }; }
     // the valheim-server image: wait for an active join code; its join-code check sometimes crashes
     // (NullReferenceException in OnCheckJoinCodeSuccess) and leaves a code nobody can resolve -> restart the game only
     for (let attempt = 1; attempt <= 4; attempt++) {
@@ -1092,7 +1156,7 @@ let status = { reachable: null, checkedAt: null };
 let polling = false;
 const publicAddress = () => (srv()?.role === 'player' ? manifest?.server?.address : status.publicIp) || null;
 async function steamPlayers() {
-  const a = a2s.parseAddress(publicAddress() || (srv()?.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean));
+  const a = a2s.parseAddress(publicAddress() || (srv()?.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean), gdef());
   if (!a) return null;
   const i = await a2s.info(a.host, a.queryPort);
   return i.players;
@@ -1107,18 +1171,20 @@ async function pollStatus() {
     if (s.role === 'admin' && s.conn) {
       const tr = transport();
       let st = await tr.status().catch(e => ({ reachable: false, error: e.message, checkedAt: Date.now() }));
-      if (!st) {
-        // no process view (plain SSH, local, FTP): the Steam query says if it is up and who plays
-        st = { reachable: true, checkedAt: Date.now(), container: 'running' };
-        try { const i = await (async () => { const a = a2s.parseAddress((s.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean)); return a ? a2s.info(a.host, a.queryPort) : null; })(); if (i) { st.players = i.players; st.gameUp = true; st.idle = i.players === 0; } else st.unknown = true; }
+      const query = async () => {
+        try { const i = await (async () => { const a = a2s.parseAddress((s.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean), gdef()); return a ? a2s.info(a.host, a.queryPort) : null; })(); if (i) { st.players = i.players; st.gameUp = true; st.idle = i.players === 0; } else st.unknown = true; }
         catch { st.unknown = true; }   // (crossplay servers do not answer the Steam query either)
-      }
+      };
+      // no process view (plain SSH, local, FTP): the Steam query says if it is up and who plays
+      if (!st) { st = { reachable: true, checkedAt: Date.now(), container: 'running' }; await query(); }
+      // another game's container: Docker says if it runs, the Steam query who plays
+      else if (!tr.valheimImage && st.container === 'running') await query();
       status = st;
     } else if (s.role === 'player') {
       const sv = manifest?.server || {};
       status = { reachable: true, checkedAt: Date.now(), container: 'running', joinCode: sv.joinCode || null, publicIp: sv.address || null, fromList: true };
       if (!sv.joinCode && !sv.address) status.unknown = true;   // the list says nothing about the server right now
-      if (sv.address) { const a = a2s.parseAddress(sv.address); try { const i = await a2s.info(a.host, a.queryPort); status.players = i.players; status.gameUp = true; } catch { } }
+      if (sv.address) { const a = a2s.parseAddress(sv.address, gdef()); try { const i = await a2s.info(a.host, a.queryPort); status.players = i.players; status.gameUp = true; } catch { } }
     }
   } catch (e) { status = { reachable: false, error: e.message, checkedAt: Date.now() }; }
   polling = false;
@@ -1236,7 +1302,7 @@ async function deleteConfigs(rels) {
   for (let i = 0; i < 30 && twoWayBusy; i++) await new Promise(r => setTimeout(r, 500));
   const s = srv();
   let remote = false;
-  if (isAdmin() && s.conn && s.syncConfigs) {
+  if (isAdmin() && s.conn && s.syncConfigs && gdef().configs) {
     const tr = transport();
     try { await tr.remove(tr.configDir, rels); remote = true; }
     catch (e) { return { ok: false, error: `Could not delete them on the server: ${e.message}` }; }
@@ -1252,7 +1318,7 @@ async function deleteConfigs(rels) {
 // ---------- the server's own settings (valheim-server image: the compose env_file) ----------
 async function serverEnvLocate() {
   const s = srv(), tr = transport();
-  if (!isAdmin() || !tr?.docker) throw new Error('Only for Docker servers (valheim-server image) reached over SSH.');
+  if (!isAdmin() || !tr?.valheimImage) throw new Error('Only for Docker servers (valheim-server image) reached over SSH.');
   const info = await tr.composeInfo();
   if (!info) throw new Error('The container was not started with docker compose - its variables cannot be edited from here.');
   const composeTexts = [];
@@ -1417,7 +1483,7 @@ async function twoWay(reason) {
           if (pr.packages[full]) {
             await tr.remove(tr.pluginsDir, [e]);
             log(`The server also had ${e} (put there by hand) - replacing it with ${full} from the profile`);
-          } else if (catalogIndex.get(full)) {
+          } else if (isValheim() && catalogIndex.get(full)) {
             try {
               await installThunderstore({ key: full, full, ver: ver || catalogIndex.get(full).ver, role: 'user', title: catalogIndex.get(full).name }, new Set());
               log(`Brought from the server: ${full} ${ver || ''} (from Thunderstore)`, 'done');
@@ -1442,7 +1508,7 @@ async function twoWay(reason) {
         send('mods', modsPayload());
       }
     }
-    if (s.syncConfigs) {
+    if (s.syncConfigs && gdef().configs) {
       const cacheFile = path.join(serverDir(s.id), 'remote-cache.json'), cache = readJson(cacheFile, {});
       const r = await syncConfigs({ transport: tr, configDir: configDir(), stateFile: path.join(serverDir(s.id), 'config-sync.json'), sideOf: configSides, cache, pending: readPending() });
       if (tr.hashless) writeJson(cacheFile, cache);
@@ -1471,8 +1537,9 @@ function schedulePublish(reason) {
   publishTimer = setTimeout(() => publishList(reason), 4000);
 }
 function buildList() {
-  const s = srv();
+  const s = srv(), pk = getProfile().packages;
   return buildServerList({
+    game: gdef().id, loader: pk[EML] ? { ver: pk[EML].ver } : null,
     mods: adminMods().mods, nexusLinks: s.nexusLinks,
     server: { name: s.name, world: s.world, joinCode: status.codeBroken ? null : status.joinCode || null, joinCodeAt: status.joinCodeAt || null, address: s.publishAddress ? status.publicIp || null : null,
       // opt-in: everyone with the invite link can read it (the list is the same link that gives them the IP)
@@ -1491,7 +1558,7 @@ async function publishList(reason) {
   const s = srv();
   if (!isAdmin() || listState.busy) return { ok: false, error: 'ocupat' };
   const list = { ...buildList(), updatedAt: Date.now() };
-  if (!list.required.length) { listState.error = 'Profilul nu are moduri de server - nu public lista.'; send('list', listState); return { ok: false, error: listState.error }; }
+  if (!list.required.length && !(list.game && list.game !== 'valheim')) { listState.error = 'Profilul nu are moduri de server - nu public lista.'; send('list', listState); return { ok: false, error: listState.error }; }
   if (readState().restartPending) { listState.error = 'The server has not restarted with the new mods yet - the list is published after the restart.'; send('list', listState); return { ok: false, error: listState.error }; }
   const token = await githubToken();
   if (!token) { listState.error = 'Connect to GitHub (Settings → GitHub) to publish the list.'; send('list', listState); return { ok: false, error: listState.error }; }
@@ -1513,7 +1580,7 @@ async function publishList(reason) {
 const modpackDir = () => path.join(serverDir(srv().id), 'modpack');
 function modpackInfo() {
   const s = srv();
-  if (!s || !isAdmin() || !s.modpackName) return { configured: false };
+  if (!s || !isAdmin() || !s.modpackName || !gdef(s).thunderstore) return { configured: false };
   const man = readJson(path.join(modpackDir(), 'manifest.json'), null);
   const prof = adminMods().mods.filter(m => !m.manual && !m.modpack);
   const inPack = {};
@@ -1605,6 +1672,7 @@ function uniqueId(name) { let id = slug(name), i = 2; while (G.servers.some(s =>
 function activate(id) {
   G.activeServer = id; saveSettings();
   profile = null; seenSig = null; syncedSig = null; changedAt = null; status = { reachable: null };
+  nexus.setGame(gdef().nexus); game = { game: null, steam: null }; findGame().then(g => { game = g; send('player', playerInfo()); }).catch(() => { });
   Object.assign(watch, { text: '', state: 'idle', dirty: false, lastSync: null, lastResult: null, retryAt: null, twoWay: null });
   Object.assign(listState, { at: null, ok: null, error: null, changed: null, busy: false });
   loadManifestCache(); indexCatalog();
@@ -1619,8 +1687,9 @@ async function addServer(invite) {
   let m;
   try { m = await listhost.fetchList(fetchN, src); } catch (e) { return { ok: false, error: `The server list cannot be read: ${e.message}` }; }
   const name = m.server?.name || 'Server';
+  if (m.game && !games.GAMES[m.game]) return { ok: false, error: `This server is for a game this Bifrost does not know (${m.game}) - update Bifrost.` };
   const id = uniqueId(name);
-  G.servers.push({ ...SERVER_DEFAULTS, id, name, role: 'player', list: src, profileDir: path.join(DATA, 'profiles', id), createdAt: Date.now() });
+  G.servers.push({ ...SERVER_DEFAULTS, id, name, role: 'player', game: m.game || 'valheim', list: src, profileDir: path.join(DATA, 'profiles', id), createdAt: Date.now() });
   writeJson(path.join(serverDir(id), 'list-cache.json'), m);
   saveSettings();
   log(`Server added: ${name} (${listhost.inviteCode(src)})`, 'done');
@@ -1630,11 +1699,13 @@ async function addServer(invite) {
 // cfg: { name, world, conn, secret, builtin, source: { kind: 'empty'|'local'|'code'|'server', dir, code }, list: { kind: 'gist'|'github', repo } }
 async function createServer(cfg) {
   if (job) return { ok: false, error: 'Lucrez deja.' };
-  const id = uniqueId(cfg.name);
+  const id = uniqueId(cfg.name), gameId = games.GAMES[cfg.game] ? cfg.game : 'valheim';
   const s = {
-    ...SERVER_DEFAULTS, id, name: cfg.name || 'Server', role: cfg.personal ? 'player' : 'admin', world: cfg.world || '', createdAt: Date.now(),
+    ...SERVER_DEFAULTS, id, name: cfg.name || 'Server', role: cfg.personal ? 'player' : 'admin', game: gameId, world: cfg.world || '', createdAt: Date.now(),
     profileDir: path.join(DATA, 'profiles', id), conn: cfg.conn || null, connSecretEnc: cfg.secret ? enc(cfg.secret) : null,
-    builtin: cfg.builtin || (cfg.conn?.type === 'ssh-docker' ? 'ValheimPlus|BepInExPack' : 'BepInExPack'),
+    builtin: cfg.builtin || (gameId !== 'valheim' ? 'BepInExPack' : cfg.conn?.type === 'ssh-docker' ? 'ValheimPlus|BepInExPack' : 'BepInExPack'),
+    // (the config sync and Thunderstore's modpack are Valheim things)
+    ...(gameId !== 'valheim' ? { syncConfigs: false } : {}),
     list: cfg.list?.kind === 'github' && cfg.list.repo ? { kind: 'github', repo: cfg.list.repo, path: 'server.json' } : null,
   };
   G.servers.push(s); saveSettings();
@@ -1647,6 +1718,13 @@ async function createServer(cfg) {
 }
 // fill the current profile: other mod managers, a profile code or what the server already runs
 async function importInto(source) {
+  if (gdef().loader === 'eml' && source.kind !== 'server') {
+    // Enshrouded: the loader; mods come from Discover (Nexus)
+    setJob({ kind: 'import', label: 'Installing EML', started: Date.now() });
+    try { await installLoader(); } catch (e) { log(`EML: ${e.message}`, 'error'); return { ok: false, error: `EML could not be installed: ${e.message}` }; }
+    finally { setProgress(null); setJob(null); afterProfileChange(); }
+    return { ok: true, count: Object.keys(getProfile().packages).length };
+  }
   if (source.kind === 'empty') {
     await installThunderstore({ key: BEPINEX, full: BEPINEX, ver: catalogIndex.get(BEPINEX)?.ver || '5.4.2351', role: 'user', title: 'BepInExPack Valheim' }, new Set()).catch(e => log(e.message, 'error'));
     return { ok: true, count: Object.keys(getProfile().packages).length };
@@ -1678,11 +1756,12 @@ async function importInto(source) {
         if (side) st.mods[full] = side;
       }
       writeState(st);
-      if (!mods.some(m => m.full === BEPINEX)) mods.unshift({ full: BEPINEX, ver: catalogIndex.get(BEPINEX)?.ver || '5.4.2351', title: 'BepInExPack Valheim' });
+      if (gdef().loader === 'eml') await installLoader().catch(e => log(`EML: ${e.message}`, 'error'));
+      else if (!mods.some(m => m.full === BEPINEX)) mods.unshift({ full: BEPINEX, ver: catalogIndex.get(BEPINEX)?.ver || '5.4.2351', title: 'BepInExPack Valheim' });
       // the valheim-server image brings ValheimPlus itself (VALHEIM_PLUS=true), so it is not in the plugins folder -
       // but every player needs it (the server enforces it): the Thunderstore package of the same fork goes in the profile
       const VPLUS = 'Grantapher-ValheimPlus_Grantapher_Temporary';
-      if (builtin.test('ValheimPlus') && !mods.some(m => /ValheimPlus/i.test(m.full))) {
+      if (isValheim() && builtin.test('ValheimPlus') && !mods.some(m => /ValheimPlus/i.test(m.full))) {
         mods.push({ full: VPLUS, ver: catalogIndex.get(VPLUS)?.ver || '10.2.0', title: 'ValheimPlus' });
         log('  + ValheimPlus (the server has it from its image, players need it)', 'out');
       }
@@ -1764,7 +1843,7 @@ async function handleLink(url) {
   }
   const x = Nexus.parseNxm(url);
   if (!x) return toast('Invalid Nexus link.', 'error');
-  if (x.game !== 'valheim') return toast(`The link is for ${x.game}, not Valheim.`, 'error');
+  if (x.game !== gdef().nexus.domain) return toast(`The link is for ${x.game}, but the open server is a ${gdef().name} server - switch to its server first.`, 'error');
   if (job) return toast('Already working - press again when it is done.', 'error');
   if (!srv()) return toast('Add or create a server first.', 'error');
   const pend = nexusPending[x.modId];
@@ -1781,7 +1860,7 @@ async function handleLink(url) {
     shell.openExternal(Nexus.filesPage(nexusWaiting[0].modId, nexusWaiting[0].fileId));
   } else if (resumePlay) {
     resumePlay = false;
-    toast(`${e.title} installed - all Nexus mods are ready, starting Valheim.`, 'ok');
+    toast(`${e.title} installed - all Nexus mods are ready, starting ${gdef().name}.`, 'ok');
     setTimeout(() => playerSync({ launch: true }).then(res => { if (!res.ok && res.error) toast(res.error, 'error'); }), 800);
   } else toast(`${e.title} installed.`, 'ok');
 }
@@ -1838,7 +1917,7 @@ async function action(name, arg) {
     case 'removeServer': return removeServer(arg);
     case 'localProfiles': return { ok: true, profiles: importers.localProfiles(app.getPath('appData')) };
     case 'testConnection': {
-      try { const tr = makeTransport(arg.conn, arg.secret || dec(s?.connSecretEnc)); const r = await tr.test(); let mods = null; try { mods = (await tr.list(tr.pluginsDir)).length; } catch { } return { ok: true, ...r, mods }; }
+      try { const tr = makeTransport(arg.conn, arg.secret || dec(s?.connSecretEnc), arg.game || gdef().id); const r = await tr.test(); let mods = null; try { mods = (await tr.list(tr.pluginsDir)).length; } catch { } return { ok: true, ...r, mods }; }
       catch (e) { return { ok: false, error: e.message }; }
     }
     case 'setConnection': {
@@ -1862,7 +1941,7 @@ async function action(name, arg) {
       if (!s?.conn) return { ok: false, error: 'The server has no connection.' };
       try {
         const st = readState();
-        const r = await syncMods(st, { pluginsDir: pluginsDir(), transport: transport(), builtin: new RegExp(s.builtin || 'BepInExPack', 'i'), allMods: s.syncAllMods, dryRun: true });
+        const r = await syncMods(st, { pluginsDir: pluginsDir(), transport: transport(), builtin: new RegExp(s.builtin || 'BepInExPack', 'i'), allMods: s.syncAllMods, dryRun: true, ...syncGameOpts() });
         return { ok: true, toCopy: r.copy.join(', ') || '-', toRemove: r.remove.join(', ') || '-' };
       } catch (e) { return { ok: false, error: e.message }; }
     }
@@ -1913,7 +1992,7 @@ async function action(name, arg) {
     case 'nexusLink': {
       if (!arg.url) { delete s.nexusLinks[arg.name]; saveSettings(); send('mods', modsPayload()); return { ok: true }; }
       const modId = Nexus.parseModUrl(arg.url);
-      if (!modId) return { ok: false, error: 'Paste the link of the Nexus page (nexusmods.com/valheim/mods/...).' };
+      if (!modId) return { ok: false, error: `Paste the link of the Nexus page (nexusmods.com/${gdef().nexus.domain}/mods/...).` };
       try {
         const [m, files] = await Promise.all([nexus.modInfo(modId), nexus.modFiles(modId)]);
         const f = Nexus.pickMain(files);
@@ -1972,9 +2051,12 @@ async function action(name, arg) {
       catch (e) { return { ok: false, error: e.message }; }
     }
     case 'setSetting': {
-      if (GLOBAL_SETTABLE.includes(arg.key)) { G[arg.key] = arg.value; saveSettings(); if (arg.key === 'startWithWindows') applyStartup();
+      if (arg.key === 'gameDir' && !isValheim()) {   // (the other games' folders: G.gameDirs)
+        G.gameDirs = { ...(G.gameDirs || {}), [gdef().id]: arg.value || null }; saveSettings();
+        findGame().then(g => { game = g; send('player', playerInfo()); });
+      } else if (GLOBAL_SETTABLE.includes(arg.key)) { G[arg.key] = arg.value; saveSettings(); if (arg.key === 'startWithWindows') applyStartup();
         if (arg.key === 'lang') trayMenu();
-        if (arg.key === 'gameDir') { Profile.findGame().then(g => { game = g; if (Profile.isGameDir(G.gameDir)) game.game = G.gameDir; send('player', playerInfo()); }); } }
+        if (arg.key === 'gameDir') { findGame().then(g => { game = g; send('player', playerInfo()); }); } }
       else if (SERVER_SETTABLE[arg.key] && s) {
         s[SERVER_SETTABLE[arg.key]] = arg.value; saveSettings();
         if (arg.key === 'autoSync') { if (arg.value && watch.dirty) changedAt = Date.now() - s.quietSeconds * 1000; setWatch(arg.value ? 'idle' : 'off', arg.value ? 'pornit' : 'auto-sync oprit'); }
@@ -2023,10 +2105,10 @@ async function action(name, arg) {
       if (s) for (const p of Object.values(getProfile().packages)) if (p.source === 'nexus') out[p.modId] = p.ver;
       return { ok: true, installed: out, pending: nexusPending };
     }
-    case 'findGame': game = await Profile.findGame(); if (Profile.isGameDir(G.gameDir)) game.game = G.gameDir; send('player', playerInfo()); return { ok: !!game.game, game };
+    case 'findGame': game = await findGame(); send('player', playerInfo()); return { ok: !!game.game, game };
     case 'restoreLoader': {
       if (!game.game) return { ok: false, error: 'The game folder is not found.' };
-      const ok = Profile.restoreGame(game.game);
+      const ok = Profile.restoreGame(game.game, gdef());
       send('player', playerInfo());
       return ok ? { ok: true } : { ok: false, error: 'There is no backup (Bifrost has not replaced anything).' };
     }
@@ -2070,8 +2152,7 @@ app.whenReady().then(async () => {
   setTimeout(() => checkUpdates(6 * 3600e3), 6000);
   setInterval(() => checkUpdates(6 * 3600e3), 3600e3);
   setTimeout(checkAppUpdate, 15000); setInterval(checkAppUpdate, 4 * 3600e3);
-  game = await Profile.findGame();
-  if (Profile.isGameDir(G.gameDir)) game.game = G.gameDir;
+  game = await findGame();
   send('player', playerInfo());
   // admin: watch the profile, sync, configs; everyone: status + the list
   setTimeout(() => { if (isAdmin() && srv().conn && srv().autoSync) syncNow('startup'); }, 4000);

@@ -1,4 +1,14 @@
-﻿## Bifrost 1.9.16
+﻿## Bifrost 2.0.0
+
+- **Enshrouded support.** When you create a server (or a personal profile) you pick the game: Valheim or Enshrouded. Everything else works the same way: mods in Discover, sync to the server, restart when nobody plays, the list + invite for friends, PLAY.
+- Enshrouded mods come from **Nexus Mods** and are loaded by **EML** (Enshrouded Mod Loader, github.com/Brabb3l/kfc-parser). Bifrost downloads EML itself and puts its dbghelp.dll next to enshrouded.exe on your PC and next to enshrouded_server.exe on the server; the game's mods folder points at the chosen server's profile, so every server keeps its own mods.
+- Discover → **EML only** (on by default): most of Enshrouded's top downloads on Nexus are Cheat Engine tables and saves, which no mod manager can install.
+- A mod whose mod.json is wrong (or has the same id as one you have) is refused at install - EML would otherwise stop the game with a Fatal error.
+- Enshrouded server: tell Bifrost the server's folder (where enshrouded_server.exe is; /opt/enshrouded/server in the mornedhels/enshrouded-server image). Docker servers need WINEDLLOVERRIDES=dbghelp=native,builtin in the container's environment - Bifrost warns when it is missing.
+- Settings → Mod loader → Put back removes EML from the game folder and restores the game's original data file.
+- Valheim works exactly as before.
+
+## Bifrost 1.9.16
 
 - **Direct join diagnostics** (for a friend whose PLAY still asked for the password): on PLAY the Log now says where the password came from (or why there is none), the arguments sent to Steam (password hidden), Valheim's Launch Options in Steam, a warning for passwords with spaces or special characters, and - a minute or two later - whether the game really received the server address (Valheim logs "JOIN <address>" when it does).
 - Settings → Server password says when a saved password cannot be read on this PC (instead of "Password saved"), so it can be saved again.

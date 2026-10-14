@@ -6,7 +6,7 @@ const L = (ro, en) => ((S.settings?.lang || 'en') === 'en' ? en : ro);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const S = { settings: {}, profile: { mods: [] }, status: {}, job: null, watch: {}, updates: {}, modpack: {}, filter: 'all', search: '',
   player: null, list: {}, appUpdate: null,
-  src: 'ts', nx: { list: [], total: 0, loading: false, error: null, installed: {}, pending: {}, seq: 0, cat: null, cats: null, old: false },
+  src: 'ts', nx: { list: [], total: 0, loading: false, error: null, installed: {}, pending: {}, seq: 0, cat: null, cats: null, old: false, eml: true },
   installing: {}, catalog: null, catalogBusy: false, catalogFetched: null, bq: '', bsort: 'dl', bcat: null, bpacks: false, bdep: false, blimit: 60, drawer: null };
 
 // ---------- helpers ----------
@@ -58,7 +58,7 @@ document.addEventListener('click', e => { const l = e.target.closest('[data-page
 function renderStatus() {
   const s = S.status;
   $('#srv-name').textContent = S.settings.serverName || 'Server';
-  $('#srv-world').textContent = [S.settings.serverWorld, 'crossplay'].filter(Boolean).join(' · ');
+  $('#srv-world').textContent = [S.settings.serverWorld, S.settings.game?.id === 'enshrouded' ? 'Enshrouded' : 'crossplay'].filter(Boolean).join(' · ');
   const pill = $('#srv-pill'), st = $('#srv-state');
   pill.className = 'status-pill';
   let tb = '';
@@ -87,7 +87,7 @@ function renderStatus() {
   $('#srv-codebroken').hidden = !(s.reachable && s.container === 'running' && s.codeBroken);
   const down = $('#srv-down');
   if (s.reachable === false) { down.hidden = false; down.innerHTML = `<b>Nu ajung la server prin SSH.</b> <span class="muted">${esc(s.error || '')}</span>`; }
-  else if (s.reachable && s.container && s.container !== 'running') { down.hidden = false; down.innerHTML = `<b>Containerul Valheim nu rulează.</b> <button class="btn small" data-act="startServer">Pornește serverul</button>`; }
+  else if (s.reachable && s.container && s.container !== 'running') { down.hidden = false; down.innerHTML = `<b>${L(`Containerul ${gameName()} nu rulează.`, `The ${gameName()} container is not running.`)}</b> <button class="btn small" data-act="startServer">Pornește serverul</button>`; }
   else down.hidden = true;
   $('#btn-start').hidden = !(s.reachable && s.container && s.container !== 'running');
 
@@ -179,14 +179,16 @@ function renderMods() {
     const badges = [
       hasUpdate(m) ? (S.installing[m.name] ? `<span class="badge pending">${S.installing[m.name].queued ? 'în coadă' : 'se actualizează...'}</span>` : `<button class="badge update" data-update="${esc(m.name)}" data-ver="${esc(u.latest)}" title="${L('Actualizează la ultima versiune', 'Update to the latest version')}">update ${esc(u.latest)} ↻</button>`) : '',
       !m.enabled ? '<span class="badge off">dezactivat</span>' : '',
-      m.manual ? (m.nexus ? `<button class="badge onsrv" data-nexus="${esc(m.name)}" title="Prietenii îl iau de pe Nexus (${esc(m.nexus.title)} ${esc(m.nexus.version || '')})">nexus ${esc(m.nexus.modId)}</button>`
+      m.manual && m.source !== 'github' ? (m.nexus ? `<button class="badge onsrv" data-nexus="${esc(m.name)}" title="Prietenii îl iau de pe Nexus (${esc(m.nexus.title)} ${esc(m.nexus.version || '')})">nexus ${esc(m.nexus.modId)}</button>`
         : `<button class="badge off" data-nexus="${esc(m.name)}" title="Leagă-l de pagina lui de pe Nexus ca prietenii să-l poată instala">manual · leagă de Nexus</button>`) : '',
       m.modpack ? '<span class="badge lock">modpack-ul tău</span>' : '',
       sd === 'server' && m.onServer ? '<span class="badge onsrv">pe server</span>' : '',
       sd === 'server' && !m.onServer ? '<span class="badge pending">urmează pe server</span>' : '',
       sd === 'new' ? '<span class="badge pending">nou - se ghicește la sync</span>' : '',
     ].join('');
-    const seg = sd === 'builtin'
+    const seg = m.name === 'eml-loader'
+      ? `<span class="badge lock" title="${esc(L('Bifrost îl pune lângă enshrouded_server.exe pe server și lângă enshrouded.exe la jucători', 'Bifrost puts it next to enshrouded_server.exe on the server and next to enshrouded.exe for players'))}">${L('server + jucători', 'server + players')}</span>`
+      : sd === 'builtin'
       ? '<span class="badge lock" title="Vine din imaginea serverului (VALHEIM_PLUS=true)">inclus în server</span>'
       : m.modpack ? '' :
         `<div class="seg" data-name="${esc(m.name)}"><button class="server ${sd === 'server' ? 'on' : ''}" data-side="server" ${busy ? 'disabled' : ''}>Server</button><button class="client ${sd === 'client' ? 'on' : ''}" data-side="client" ${busy ? 'disabled' : ''}>Client</button></div>`;
@@ -222,7 +224,7 @@ $('#mod-list').addEventListener('click', async e => {
   const nx = e.target.closest('[data-nexus]');
   if (nx) {
     const m = (S.profile.mods || []).find(x => x.name === nx.dataset.nexus);
-    const url = await confirmBox(L(`${nx.dataset.nexus} pe Nexus`, `${nx.dataset.nexus} on Nexus`), L('Lipește linkul paginii modului de pe Nexus (ex. https://www.nexusmods.com/valheim/mods/1234). Bifrost ia fișierul principal, cel mai nou. Gol = scoate legătura.', 'Paste the link of the mod\'s Nexus page (e.g. https://www.nexusmods.com/valheim/mods/1234). Bifrost takes the newest main file. Empty = remove the link.'), L('Salvează', 'Save'), m?.nexus ? `https://www.nexusmods.com/valheim/mods/${m.nexus.modId}` : '');
+    const url = await confirmBox(L(`${nx.dataset.nexus} pe Nexus`, `${nx.dataset.nexus} on Nexus`), L(`Lipește linkul paginii modului de pe Nexus (ex. https://www.nexusmods.com/${nxDomain()}/mods/1234). Bifrost ia fișierul principal, cel mai nou. Gol = scoate legătura.`, `Paste the link of the mod's Nexus page (e.g. https://www.nexusmods.com/${nxDomain()}/mods/1234). Bifrost takes the newest main file. Empty = remove the link.`), L('Salvează', 'Save'), m?.nexus ? `https://www.nexusmods.com/${nxDomain()}/mods/${m.nexus.modId}` : '');
     if (url === null) return;
     const r = await window.vp.act('nexusLink', { name: nx.dataset.nexus, url });
     toast(r.ok ? (r.link ? L(`Legat de „${r.link.title}” ${r.link.version || ''} (fișierul ${r.link.fileName}).`, `Linked to "${r.link.title}" ${r.link.version || ''} (file ${r.link.fileName}).`) : L('Legătură scoasă.', 'Link removed.')) : r.error, r.ok ? 'ok' : 'error');
@@ -283,7 +285,16 @@ function renderMiniLog() {
 // ---------- settings ----------
 function renderSettingsGame() {
   const g = S.player?.game;
-  if (g) $('#game-detected').textContent = g.game ? L(`Acum: ${g.game}`, `Now: ${g.game}`) : L('Nu l-am găsit prin Steam - scrie aici folderul care conține valheim.exe.', 'Not found through Steam - type the folder that contains valheim.exe here.');
+  const exe = S.settings.game?.exe || 'valheim.exe';
+  if (g) $('#game-detected').textContent = g.game ? L(`Acum: ${g.game}`, `Now: ${g.game}`) : exe === 'valheim.exe' ? L('Nu l-am găsit prin Steam - scrie aici folderul care conține valheim.exe.', 'Not found through Steam - type the folder that contains valheim.exe here.') : L(`Nu l-am găsit prin Steam - scrie aici folderul care conține ${exe}.`, `Not found through Steam - type the folder that contains ${exe} here.`);
+  if (g && S.settings.game?.loader === 'eml') {
+    // Enshrouded: EML (dbghelp.dll) + the mods folder linked to the server's profile
+    $('#btn-restore-loader').disabled = !g.game || g.owner !== 'bifrost';
+    $('#loader-state').textContent = { bifrost: L('Acum încarcă modurile Bifrost: EML (dbghelp.dll) lângă enshrouded.exe, iar folderul mods e legat de profilul serverului ales. „Pune înapoi” scoate EML și pune la loc fișierul original al jocului.', 'Bifrost loads the mods now: EML (dbghelp.dll) next to enshrouded.exe, and the mods folder is linked to the chosen server\'s profile. "Put back" removes EML and restores the game\'s original data file.'),
+      other: L('Acum e alt încărcător (dbghelp.dll / winmm.dll) - la JOACĂ preia Bifrost (păstrez un backup).', 'Another loader is in place (dbghelp.dll / winmm.dll) - PLAY makes Bifrost take over (a backup is kept).'),
+      none: L('Enshrouded e fără moduri acum. La JOACĂ, Bifrost pune EML lângă joc.', 'Enshrouded has no mods right now. PLAY puts EML next to the game.') }[g.owner] || '';
+    return;
+  }
   if (g) {
     $('#btn-restore-loader').disabled = !g.backup;
     const who = { bifrost: L('Acum încarcă modurile Bifrost.', 'Bifrost loads the mods now.'), tmm: L('Acum încarcă modurile Thunderstore Mod Manager / r2modman - la JOACĂ preia Bifrost (păstrez un backup).', 'Thunderstore Mod Manager / r2modman loads the mods now - PLAY makes Bifrost take over (a backup is kept).'), other: L('Acum e alt încărcător BepInEx - la JOACĂ preia Bifrost (păstrez un backup).', 'Another BepInEx loader is in place - PLAY makes Bifrost take over (a backup is kept).'), none: L('Valheim e fără moduri acum.', 'Valheim has no mods right now.'), native: L('Linux: Bifrost pornește Valheim direct cu BepInEx-ul din profil, folderul jocului rămâne neatins.', 'Linux: Bifrost starts Valheim directly with the profile\'s BepInEx; the game folder stays untouched.') }[g.owner];
@@ -318,7 +329,20 @@ function renderSettings() {
   $$('[data-act="restart"]').forEach(b => { b.hidden = !s.canRestart; });
   renderServers();
   document.body.classList.toggle('role-admin', !!s.isAdmin); document.body.classList.toggle('role-player', !s.isAdmin);
-  $('#brand-sub').textContent = s.server?.name || 'Valheim';
+  $('#brand-sub').textContent = s.server?.name || gameName();
+  renderGame();
+}
+// the open server's game: body.g-<id> hides what only Valheim has (.vh-only); Discover is Nexus-only without Thunderstore
+const gameName = () => S.settings?.game?.name || 'Valheim';
+const nxDomain = () => S.settings?.game?.nexusDomain || 'valheim';
+function renderGame() {
+  const g = S.settings.game || { id: 'valheim', name: 'Valheim', thunderstore: true, outdated: true, exe: 'valheim.exe' };
+  for (const c of [...document.body.classList]) if (c.startsWith('g-')) document.body.classList.remove(c);
+  document.body.classList.add(`g-${g.id}`);
+  $('#game-dir-label').textContent = L(`Folderul ${g.name}`, `${g.name} folder`);
+  if (!g.thunderstore && S.src !== 'nx') setSource('nx');
+  $('#br-old-wrap').hidden = S.src !== 'nx' || !g.outdated;
+  $('#br-eml-wrap').hidden = g.loader !== 'eml';
 }
 $('#btn-nexus').onclick = async () => {
   const v = $('#nexus-input').value.trim(); if (!v) return;
@@ -401,7 +425,7 @@ document.addEventListener('click', async e => {
   else if (act === 'fixcode' && r.ok) toast('Jocul repornește - codul nou apare în ~2 minute.', 'ok');
   else if (act === 'publishList' && r.ok) toast(r.changed ? 'Lista pentru prieteni e publicată.' : 'Lista era deja la zi.', 'ok');
   else if (act === 'updateMods' && r.ok) toast('Modurile sunt la zi.', 'ok');
-  else if (act === 'play' && r.ok) toast('Pornesc Valheim prin Steam...', 'ok');
+  else if (act === 'play' && r.ok) toast(L(`Pornesc ${gameName()} prin Steam...`, `Starting ${gameName()} through Steam...`), 'ok');
   else if (act === 'refreshList' && r.ok) toast('Lista serverului e actualizată.', 'ok');
   else if (act === 'importTmm' && r.ok) toast(L(`Import gata: ${r.count} pachete în profilul Bifrost. De acum pornește Valheim cu JOACĂ.`, `Import done: ${r.count} packages in the Bifrost profile. From now on start Valheim with PLAY.`), 'ok');
   else if (act === 'updateAll' && r.ok) toast(r.count ? L(`${r.count} moduri actualizate - sincronizez serverul.`, `${r.count} ${r.count === 1 ? 'mod' : 'mods'} updated - syncing the server.`) : L('Totul e la zi.', 'Everything is up to date.'), 'ok');
@@ -530,6 +554,7 @@ $('#br-sort').addEventListener('change', e => { S.bsort = e.target.value; render
 $('#br-packs').addEventListener('change', e => { S.bpacks = e.target.checked; renderBrowse(true); });
 $('#br-dep').addEventListener('change', e => { S.bdep = e.target.checked; buildCats(); renderBrowse(true); });
 $('#br-old').addEventListener('change', e => { S.nx.old = e.target.checked; nexusSearch(true); });
+$('#br-eml').addEventListener('change', e => { S.nx.eml = e.target.checked; nexusSearch(true); });
 $('#br-cats').addEventListener('click', e => {
   const c = e.target.closest('[data-cat]'); if (!c) return;
   if (S.src === 'nx') { S.nx.cat = c.dataset.cat || null; buildNexusCats(); nexusSearch(true); return; }
@@ -544,7 +569,7 @@ function setSource(src) {
   S.src = src;
   $$('#br-source button').forEach(b => b.classList.toggle('on', b.dataset.src === src));
   if (src === 'nx') buildNexusCats(); else if (S.catalog) buildCats();
-  $('#br-packs-wrap').hidden = src === 'nx'; $('#br-dep-wrap').hidden = src === 'nx'; $('#br-old-wrap').hidden = src !== 'nx';
+  $('#br-packs-wrap').hidden = src === 'nx'; $('#br-dep-wrap').hidden = src === 'nx'; $('#br-old-wrap').hidden = src !== 'nx' || S.settings.game?.outdated === false;
   $('#br-search').placeholder = src === 'nx' ? L('Caută pe Nexus Mods...', 'Search Nexus Mods...') : L('Caută în Thunderstore...', 'Search Thunderstore...');
   const note = $('#br-nexus-note');
   note.hidden = src !== 'nx';
@@ -560,7 +585,7 @@ async function nexusSearch(reset) {
   const nx = S.nx, seq = ++nx.seq;
   if (reset) { nx.list = []; nx.total = 0; $('#br-grid').innerHTML = Array.from({ length: 9 }, () => '<div class="skeleton"></div>').join(''); }
   nx.loading = true; $('#br-more').textContent = 'Caut pe Nexus...';
-  const [r, inst] = await Promise.all([window.vp.act('nexusSearch', { q: S.bq, sort: NX_SORT[S.bsort] || 'downloads', offset: nx.list.length, count: 30, cat: nx.cat, old: nx.old }), reset ? window.vp.act('nexusInstalled') : null]);
+  const [r, inst] = await Promise.all([window.vp.act('nexusSearch', { q: S.bq, sort: NX_SORT[S.bsort] || 'downloads', offset: nx.list.length, count: 30, cat: nx.cat, old: nx.old, need: S.settings.game?.loader === 'eml' && nx.eml ? 'EML' : null }), reset ? window.vp.act('nexusInstalled') : null]);
   if (seq !== nx.seq) return;
   nx.loading = false;
   if (inst) { nx.installed = inst.installed; nx.pending = inst.pending; }
@@ -586,12 +611,12 @@ function nxButton(m, big) {
 }
 function renderNexus() {
   const nx = S.nx;
-  $('#br-sub').textContent = L(`Nexus Mods pentru Valheim · ${nx.total.toLocaleString(LOC())} moduri`, `Nexus Mods for Valheim · ${nx.total.toLocaleString(LOC())} mods`);
+  $('#br-sub').textContent = L(`Nexus Mods pentru ${gameName()} · ${nx.total.toLocaleString(LOC())} moduri`, `Nexus Mods for ${gameName()} · ${nx.total.toLocaleString(LOC())} mods`);
   $('#br-grid').innerHTML = nx.list.map(m => `
     <div class="pk" data-nxpk="${m.modId}">
       ${m.thumbnailUrl ? `<img src="${esc(m.thumbnailUrl)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
       <div><div class="pk-name">${esc(m.name)}</div><div class="pk-owner">de ${esc(m.author || m.uploader?.name || '?')} · v${esc(m.version || '?')}</div><div class="pk-desc">${esc(m.summary)}</div></div>
-      <div class="pk-foot"><span class="pk-stat" title="descărcări">${ICON_DL}${fmtNum(m.downloads)}</span><span class="pk-stat" title="endorsements">${ICON_STAR}${fmtNum(m.endorsements)}</span>${m.modCategory ? `<span class="nx-cat">${esc(m.modCategory.name)}</span>` : ''}${Date.parse(m.updatedAt) < NX_OUTDATED ? '<span class="side-tag dep" title="Not updated since Ashlands (May 2024) - it may not work">outdated</span>' : ''}${nxButton(m)}</div>
+      <div class="pk-foot"><span class="pk-stat" title="descărcări">${ICON_DL}${fmtNum(m.downloads)}</span><span class="pk-stat" title="endorsements">${ICON_STAR}${fmtNum(m.endorsements)}</span>${m.modCategory ? `<span class="nx-cat">${esc(m.modCategory.name)}</span>` : ''}${Date.parse(m.updatedAt) < NX_OUTDATED && S.settings.game?.outdated !== false ? '<span class="side-tag dep" title="Not updated since Ashlands (May 2024) - it may not work">outdated</span>' : ''}${nxButton(m)}</div>
     </div>`).join('');
   $('#br-more').textContent = !nx.list.length ? 'Nimic găsit.' : nx.list.length < nx.total ? `${nx.list.length} din ${nx.total.toLocaleString(LOC())} - derulează pentru mai multe` : `${nx.total} moduri`;
 }
@@ -612,7 +637,7 @@ async function openNexusDrawer(modId, keepScroll) {
   const m = S.nx.list.find(x => x.modId === modId) || S.nxDrawer; if (!m) return;
   S.drawer = `nx:${modId}`; S.nxDrawer = m;
   $('#drawer').hidden = false; $('#drawer-bg').hidden = false; if (!keepScroll) $('#drawer').scrollTop = 0;
-  const page = `https://www.nexusmods.com/valheim/mods/${modId}`;
+  const page = `https://www.nexusmods.com/${S.settings.game?.nexusDomain || 'valheim'}/mods/${modId}`;
   $('#drawer-body').innerHTML = `
     <div class="dr-head">${m.pictureUrl || m.thumbnailUrl ? `<img src="${esc(m.thumbnailUrl || m.pictureUrl)}" alt="" style="object-fit:cover">` : '<div class="ph"></div>'}
       <div><h2>${esc(m.name)}</h2><div class="muted">de ${esc(m.author || m.uploader?.name || '?')} · v${esc(m.version || '?')} · Nexus ${modId}</div>
@@ -1023,8 +1048,13 @@ function renderPlayer() {
   $('#pl-code-box').classList.toggle('off', !code);
   $('#pl-code2').textContent = code || '–';
   $('#pl-addr').textContent = srv.address || S.settings.joinTarget || (S.settings.isAdmin ? 'necunoscută încă (apare după ce pornește serverul)' : 'cere-l adminului (sau intră cu join code)');
-  const direct = S.settings.directJoin && !!S.settings.joinTarget;
-  $('#pl-howto-direct').hidden = !direct; $('#pl-howto-manual').hidden = direct;
+  const vh = (S.settings.game?.id || 'valheim') === 'valheim';
+  if (!vh) $('#pl-addr').textContent = srv.address || (S.settings.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean)?.trim() || L('cere-l adminului', 'ask the admin');
+  const direct = vh && S.settings.directJoin && !!S.settings.joinTarget;
+  $('#pl-howto-direct').hidden = !direct; $('#pl-howto-manual').hidden = direct || !vh;
+  $('#pl-howto-other').hidden = vh;
+  if (!vh) $('#pl-howto-other').innerHTML = L(`În joc: <b>Join</b> și caută serverul după nume (sau adresa de mai sus). Bifrost pornește ${esc(gameName())} prin Steam, cu EML și modurile serverului.`, `In game: <b>Join</b> and look the server up by name (or the address above). Bifrost starts ${esc(gameName())} through Steam with EML and the server's mods.`);
+  $('#pl-game-label').textContent = gameName();
   $('#pl-game').innerHTML = P.game?.game ? esc(P.game.game) : '<span style="color:var(--red)">negăsit</span> · <a href="#" data-page-link="settings">alege folderul</a>';
 
   const btn = $('#btn-play'), g = S.game || {};
@@ -1033,7 +1063,7 @@ function renderPlayer() {
   btn.disabled = !!S.job || starting || g.running || (!m && !own);
   btn.classList.toggle('working', !!(S.job || starting));
   btn.classList.toggle('running', !!g.running && !starting);
-  btn.textContent = g.running && !starting ? 'Valheim rulează' : starting ? (S.job?.kind === 'play' ? 'Se pregătește...' : 'Pornește...') : S.job ? 'Lucrez...' : 'JOACĂ';
+  btn.textContent = g.running && !starting ? L(`${gameName()} rulează`, `${gameName()} is running`) : starting ? (S.job?.kind === 'play' ? 'Se pregătește...' : 'Pornește...') : S.job ? 'Lucrez...' : 'JOACĂ';
   $('#pl-play-note').textContent = !m ? '' : need ? L(`întâi: ${P.plan.install.length} de instalat${P.plan.remove.length ? `, ${P.plan.remove.length} de scos` : ''}`, `first: ${P.plan.install.length} to install${P.plan.remove.length ? `, ${P.plan.remove.length} to remove` : ''}`) + (P.plan.bytes ? ` (~${fmtMB(P.plan.bytes)})` : '') : L('modurile sunt la zi', 'mods are up to date');
 
   // mods summary
@@ -1043,7 +1073,7 @@ function renderPlayer() {
   $('#pl-code-box').hidden = personal;
   // (no server: no address / join code rows, no joining hints)
   for (const id of ['#pl-addr', '#pl-code2']) $(id).closest('.kv').hidden = personal;
-  if (personal) { $('#pl-howto-manual').hidden = true; $('#pl-howto-direct').hidden = true; }
+  if (personal) { $('#pl-howto-manual').hidden = true; $('#pl-howto-direct').hidden = true; $('#pl-howto-other').hidden = true; }
   if (personal) { ring.className = 'ring ok'; $('#pl-mods-title').textContent = `Profil personal: ${P.installed} ${P.installed === 1 ? 'pachet' : 'pachete'}`; $('#pl-mods-sub').textContent = 'Modurile le alegi tu, din Descoperă.'; }
   else if (!m) { ring.className = 'ring busy'; $('#pl-mods-title').textContent = P.error ? 'Nu am putut lua lista serverului' : 'Iau lista serverului...'; $('#pl-mods-sub').textContent = P.error || ''; }
   else if (need) { ring.className = 'ring wait'; $('#pl-mods-title').textContent = `${P.plan.install.length} moduri de instalat / actualizat`; $('#pl-mods-sub').textContent = 'Se fac singure când apeși JOACĂ.'; }
@@ -1157,7 +1187,7 @@ function renderList() {
 }
 const listUrl = l => !l ? null : l.kind === 'gist' ? `https://gist.github.com/${l.id}` : l.kind === 'github' ? `https://github.com/${l.repo}/blob/main/${l.path || 'server.json'}` : l.url;
 $('#btn-list-open').onclick = () => { const u = listUrl(S.settings.server?.list); if (u) window.vp.act('open', u); else toast('Lista nu e publicată încă.'); };
-const shareText = () => { const v = S.settings.server; return L(`Hai pe serverul nostru de Valheim „${v.name}”!\n1. Instalează Bifrost: https://github.com/FlorinCamarut1/bifrost/releases/latest\n2. Deschide invitația: ${v.inviteLink}\n   (sau în Bifrost: Adaugă server → codul ${v.invite})\n3. Apasă JOACĂ - modurile se instalează singure.`, `Join our Valheim server "${v.name}"!\n1. Install Bifrost: https://github.com/FlorinCamarut1/bifrost/releases/latest\n2. Open the invite: ${v.inviteLink}\n   (or in Bifrost: Add server → the code ${v.invite})\n3. Press PLAY - the mods install by themselves.`); };
+const shareText = () => { const v = S.settings.server; return L(`Hai pe serverul nostru de ${gameName()} „${v.name}”!\n1. Instalează Bifrost: https://github.com/FlorinCamarut1/bifrost/releases/latest\n2. Deschide invitația: ${v.inviteLink}\n   (sau în Bifrost: Adaugă server → codul ${v.invite})\n3. Apasă JOACĂ - modurile se instalează singure.`, `Join our ${gameName()} server "${v.name}"!\n1. Install Bifrost: https://github.com/FlorinCamarut1/bifrost/releases/latest\n2. Open the invite: ${v.inviteLink}\n   (or in Bifrost: Add server → the code ${v.invite})\n3. Press PLAY - the mods install by themselves.`); };
 $('#btn-share-text').onclick = async () => { await window.vp.act('copy', shareText()); toast('Mesajul e copiat - lipește-l pe Discord.', 'ok'); };
 $('#btn-copy-invite').onclick = async () => { const v = S.settings.server; if (!v?.inviteLink) return toast('Serverul nu are încă o listă publicată.', 'error'); await window.vp.act('copy', shareText()); toast('Invitația e copiată.', 'ok'); };
 $('#btn-export-code').onclick = async () => {
@@ -1183,11 +1213,11 @@ function renderServers() {
   $('#srv-cur-badge').textContent = cur ? (cur.name || '?')[0].toUpperCase() : '+';
   $('#srv-cur-name').textContent = cur ? cur.name : 'Niciun server';
   $('#srv-cur-role').textContent = cur ? (cur.role === 'admin' ? 'admin' : cur.list ? 'jucător' : 'profil personal') : 'adaugă unul';
-  $('#srv-menu').innerHTML = list.map(x => `<button class="srv-item ${cur && x.id === cur.id ? 'on' : ''}" data-switch="${esc(x.id)}"><span class="srv-badge">${esc((x.name || '?')[0].toUpperCase())}</span>${esc(x.name)}<small>${roleName(x.role)}</small></button>`).join('')
+  $('#srv-menu').innerHTML = list.map(x => `<button class="srv-item ${cur && x.id === cur.id ? 'on' : ''}" data-switch="${esc(x.id)}"><span class="srv-badge">${esc((x.name || '?')[0].toUpperCase())}</span>${esc(x.name)}${x.game && x.game !== 'valheim' ? `<span class="game-tag">${esc(x.game)}</span>` : ''}<small>${roleName(x.role)}</small></button>`).join('')
     + `${list.length ? '<hr>' : ''}<button class="srv-item" data-menu="join">＋ Am o invitație</button><button class="srv-item" data-menu="create">＋ Creează server</button><button class="srv-item" data-menu="local">＋ Profil personal</button>`;
   if (cur) {
     const c = cur.conn;
-    $('#set-conn').textContent = !c ? 'fără conexiune - doar lista' : c.type === 'ssh-docker' ? `${c.host}, Docker „${c.container}”` : c.type === 'ssh' ? `SSH ${c.host}: ${c.pluginsDir}` : c.type === 'local' ? `acest PC: ${c.pluginsDir}` : `FTP ${c.host}: ${c.pluginsDir}`;
+    $('#set-conn').textContent = !c ? 'fără conexiune - doar lista' : c.type === 'ssh-docker' ? `${c.host}, Docker „${c.container}”` : c.type === 'ssh' ? `SSH ${c.host}: ${c.serverDir || c.pluginsDir}` : c.type === 'local' ? `acest PC: ${c.serverDir || c.pluginsDir}` : `FTP ${c.host}: ${c.serverDir || c.pluginsDir}`;
     $('#set-invite').textContent = cur.inviteLink ? `${cur.invite}` : 'lista nu e publicată încă';
     $('#set-srv-title').textContent = L(`Serverul acesta: ${cur.name}`, `This server: ${cur.name}`);
   }
@@ -1226,11 +1256,15 @@ function openWizard(mode) {
   w.querySelector('[data-src="server"]').hidden = mode === 'local' || (mode === 'import' && !cur?.conn);
   $('#wiz-note').textContent = mode === 'create' ? (S.settings.githubUser || S.settings.hasGithubToken ? '' : L('Lista pentru prieteni se publică după ce te conectezi la GitHub (Setări → Conturi) sau dacă ai GitHub CLI logat.', 'The list for friends is published once you connect GitHub (Settings → Accounts) or have the GitHub CLI logged in.')) : '';
   $('#wz-test-res').textContent = '';
+  // a new server picks its game; the connection / import of an existing one follows its game
+  const fresh = mode === 'create' || mode === 'local';
+  $('#wz-game').closest('.field').hidden = !fresh;
+  $('#wz-game').value = fresh ? 'valheim' : S.settings.game?.id || 'valheim';
   if (mode === 'conn' && cur?.conn) {
     const c = cur.conn;
     $('#wz-type').value = c.type; $('#wz-host').value = c.host || ''; $('#wz-port').value = c.port || ''; $('#wz-container').value = c.container || '';
     $('#wz-fhost').value = c.host || ''; $('#wz-fport').value = c.port || ''; $('#wz-fuser').value = c.user || ''; $('#wz-fsecure').checked = !!c.secure;
-    $('#wz-plugins').value = c.pluginsDir || ''; $('#wz-config').value = c.configDir || ''; $('#wz-restart').value = c.restartCmd || '';
+    $('#wz-plugins').value = c.pluginsDir || ''; $('#wz-config').value = c.configDir || ''; $('#wz-restart').value = c.restartCmd || ''; $('#wz-serverdir').value = c.serverDir || '';
   }
   wizType();
   window.vp.act('localProfiles').then(r => {
@@ -1240,23 +1274,44 @@ function openWizard(mode) {
   setTimeout(() => $(mode === 'create' || mode === 'local' ? '#wz-name' : '#wz-type').focus(), 50);
 }
 function wizType() {
-  const t = $('#wz-type').value;
-  $$('#wiz [data-for]').forEach(el => { el.hidden = !el.dataset.for.split(' ').includes(t); });
+  const t = $('#wz-type').value, game = $('#wz-game').value, vh = game === 'valheim';
+  $$('#wiz [data-for]').forEach(el => { el.hidden = !el.dataset.for.split(' ').includes(t) || (!!el.dataset.game && el.dataset.game !== game); });
+  $$('#wiz .radio[data-game]').forEach(el => { el.hidden = el.dataset.game !== game; if (el.hidden && el.querySelector('input').checked) $('#wiz input[name="wz-src"][value="empty"]').checked = true; });
+  $('#wz-local').hidden = !vh || $('#wiz input[name="wz-src"]:checked').value !== 'local'; $('#wz-code').hidden = !vh || $('#wiz input[name="wz-src"]:checked').value !== 'code';
+  $('#wz-type option[value="ssh-docker"]').textContent = vh ? 'Linux prin SSH, în Docker (imaginea valheim-server)' : L('Linux prin SSH, în Docker', 'Linux over SSH, in Docker');
+  $('#wz-container').placeholder = vh ? 'valheim' : 'enshrouded';
+  // (the empty profile: BepInEx for Valheim, the EML loader for Enshrouded)
+  $('#wiz input[name="wz-src"][value="empty"]').closest('.radio').querySelector('small').textContent = vh ? 'Doar BepInEx; adaugi tu din Descoperă.' : L('Doar EML (încărcătorul de moduri); adaugi tu din Descoperă (Nexus).', 'Only EML (the mod loader); add mods from Discover (Nexus).');
+  $('#wiz input[name="wz-src"][value="server"]').closest('.radio').querySelector('small').textContent = vh ? 'Citesc pluginurile de pe server și le iau din Thunderstore; restul vin ca moduri manuale.' : L('Copiez modurile din folderul mods al serverului.', "Copies the mods from the server's mods folder.");
+  const note = $('#wz-game-note');
+  note.hidden = vh;
+  if (!vh) note.innerHTML = L('Enshrouded: modurile vin de pe Nexus și le încarcă <b>EML</b> (dbghelp.dll lângă joc și lângă server). Serverul Docker are nevoie de <code>WINEDLLOVERRIDES=dbghelp=native,builtin</code> în environment (imaginea mornedhels/enshrouded-server merge; sknnr pornește din alt folder și EML nu se încarcă). Modurile de dinainte de 1.0 pot să nu meargă pe 1.0.',
+    'Enshrouded: mods come from Nexus and <b>EML</b> loads them (dbghelp.dll next to the game and the server). A Docker server needs <code>WINEDLLOVERRIDES=dbghelp=native,builtin</code> in its environment (the mornedhels/enshrouded-server image works; sknnr starts from another folder, so EML does not load). Mods made before 1.0 may not work on 1.0.');
   const ph = { 'ssh-docker': ['/config/valheimplus/plugins', '/config/valheimplus'], ssh: ['/home/steam/valheim/BepInEx/plugins', '/home/steam/valheim/BepInEx/config'], local: ['C:\\valheim-server\\BepInEx\\plugins', 'C:\\valheim-server\\BepInEx\\config'], ftp: ['/BepInEx/plugins', '/BepInEx/config'] }[t];
   if (ph) { $('#wz-plugins').placeholder = ph[0]; $('#wz-config').placeholder = ph[1]; }
+  $('#wz-serverdir').placeholder = { 'ssh-docker': '/opt/enshrouded/server', ssh: '/home/steam/enshrouded', local: 'C:\\enshrouded-server', ftp: '/' }[t] || '';
 }
 $('#wz-type').addEventListener('change', wizType);
+$('#wz-game').addEventListener('change', wizType);
 $$('#wiz input[name="wz-src"]').forEach(r => r.addEventListener('change', () => { const v = $('#wiz input[name="wz-src"]:checked').value; $('#wz-local').hidden = v !== 'local'; $('#wz-code').hidden = v !== 'code'; }));
 function wizConn() {
   const t = $('#wz-type').value;
   if (t === 'none') return null;
   const c = { type: t };
   if (t === 'ssh-docker' || t === 'ssh') { c.host = $('#wz-host').value.trim(); if ($('#wz-port').value.trim()) c.port = +$('#wz-port').value; }
-  if (t === 'ssh-docker') c.container = $('#wz-container').value.trim() || 'valheim';
+  const vh = $('#wz-game').value === 'valheim';
+  if (t === 'ssh-docker') c.container = $('#wz-container').value.trim() || (vh ? 'valheim' : 'enshrouded');
   if (t === 'ftp') { c.host = $('#wz-fhost').value.trim(); c.user = $('#wz-fuser').value.trim(); c.secure = $('#wz-fsecure').checked; if ($('#wz-fport').value.trim()) c.port = +$('#wz-fport').value; }
   const pl = $('#wz-plugins').value.trim(), cf = $('#wz-config').value.trim(), rs = $('#wz-restart').value.trim();
-  if (pl) c.pluginsDir = pl; if (cf) c.configDir = cf; if (rs && (t === 'ssh' || t === 'local')) c.restartCmd = rs;
-  if (t !== 'ssh-docker' && (!c.pluginsDir || !c.configDir)) throw new Error('Completează folderele de pluginuri și de configurări.');
+  if (rs && (t === 'ssh' || t === 'local')) c.restartCmd = rs;
+  if (!vh) {
+    // Enshrouded: the server's folder; its mods/ folder is next to enshrouded_server.exe
+    c.serverDir = $('#wz-serverdir').value.trim() || (t === 'ssh-docker' ? '/opt/enshrouded/server' : '');
+    if (!c.serverDir) throw new Error(L('Completează folderul serverului (unde e enshrouded_server.exe).', 'Fill in the server folder (where enshrouded_server.exe is).'));
+  } else {
+    if (pl) c.pluginsDir = pl; if (cf) c.configDir = cf;
+    if (t !== 'ssh-docker' && (!c.pluginsDir || !c.configDir)) throw new Error('Completează folderele de pluginuri și de configurări.');
+  }
   if ((t === 'ssh-docker' || t === 'ssh' || t === 'ftp') && !c.host) throw new Error('Completează hostul.');
   return c;
 }
@@ -1264,7 +1319,7 @@ $('#wz-test').onclick = async () => {
   let c; try { c = wizConn(); } catch (e) { $('#wz-test-res').textContent = e.message; return; }
   if (!c) return;
   $('#wz-test-res').textContent = 'testez...';
-  const r = await window.vp.act('testConnection', { conn: c, secret: $('#wz-fpass').value || undefined });
+  const r = await window.vp.act('testConnection', { conn: c, secret: $('#wz-fpass').value || undefined, game: $('#wz-game').value });
   $('#wz-test-res').innerHTML = !r.ok ? `<span style="color:var(--red)">${esc(r.error)}</span>`
     : L(`<span style="color:var(--green)">✓ conectat</span> · pluginuri: ${r.plugins ? `da${r.mods != null ? ` (${r.mods})` : ''}` : '<b>nu găsesc folderul</b>'} · configurări: ${r.config ? 'da' : '<b>nu găsesc folderul</b>'}`, `<span style="color:var(--green)">✓ connected</span> · plugins: ${r.plugins ? `yes${r.mods != null ? ` (${r.mods})` : ''}` : '<b>folder not found</b>'} · configs: ${r.config ? 'yes' : '<b>folder not found</b>'}`);
 };
@@ -1285,7 +1340,7 @@ $('#wiz-ok').onclick = async () => {
       const name = $('#wz-name').value.trim();
       if (!name) return toast('Dă-i un nume.', 'error');
       $('#wiz').hidden = true; toast(wizMode === 'create' ? 'Creez serverul și import modurile...' : 'Creez profilul...');
-      const r = await window.vp.act('createServer', { name, world: $('#wz-world').value.trim(), conn: wizMode === 'create' ? conn : null, secret, source, personal: wizMode === 'local' });
+      const r = await window.vp.act('createServer', { name, game: $('#wz-game').value, world: $('#wz-world').value.trim(), conn: wizMode === 'create' ? conn : null, secret, source, personal: wizMode === 'local' });
       toast(r.ok ? L(`Gata: ${r.count} pachete în profil.${wizMode === 'create' && conn ? ' Pun modurile pe server...' : ''}`, `Done: ${r.count} packages in the profile.${wizMode === 'create' && conn ? ' Putting the mods on the server...' : ''}`) : r.error, r.ok ? 'ok' : 'error');
     }
     $('#wiz').hidden = true;

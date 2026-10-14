@@ -59,6 +59,9 @@
     '= doar pe PC-ul tău. Dependențele modurilor de server merg automat pe server. ValheimPlus și BepInEx vin din imaginea serverului.': '= only on your PC. Dependencies of server mods go to the server automatically.',
     'pe server': 'on server', 'urmează pe server': 'going to the server', 'nou - se ghicește la sync': 'new - guessed at sync', 'inclus în server': 'part of the server', 'dezactivat': 'disabled', 'manual': 'manual',
     'manual · leagă de Nexus': 'manual · link to Nexus', 'modpack-ul tău': 'your modpack', 'se actualizează...': 'updating...', 'Niciun mod aici.': 'No mods here.',
+    // ---- other games (Enshrouded) ----
+    'Jocul': 'Game', 'Doar EML': 'EML only', 'Folderul serverului (unde e enshrouded_server.exe)': 'Server folder (where enshrouded_server.exe is)',
+    'Doar modurile pentru EML (Enshrouded Mod Loader) - pe care Bifrost le poate instala. Tabelele Cheat Engine și save-urile nu se instalează.': 'Only mods for EML (Enshrouded Mod Loader) - the ones Bifrost can install. Cheat Engine tables and saves cannot be installed.',
     // ---- browse ----
     'Descoperă moduri': 'Discover mods', 'Catalogul Thunderstore pentru Valheim': 'The Thunderstore catalog for Valheim', 'Thunderstore': 'Thunderstore', 'Nexus Mods': 'Nexus Mods',
     'Cele mai descărcate': 'Most downloaded', 'Cele mai apreciate': 'Top rated', 'Actualizate recent': 'Recently updated', 'Cele mai noi': 'Newest', 'Modpack-uri': 'Modpacks', 'Moduri neactualizate de la Ashlands (mai 2024) - cele mai multe nu mai merg': 'Mods not updated since Ashlands (May 2024) - most of them no longer work', 'Moduri marcate deprecated pe Thunderstore (încă instalabile, de ex. AzuExtendedPlayerInventory)': 'Mods marked deprecated on Thunderstore (still installable, e.g. AzuExtendedPlayerInventory)',
