@@ -1,4 +1,11 @@
-﻿## Bifrost 2.1.3
+﻿## Bifrost 2.2.0
+
+- **Enshrouded server settings** (Server → Server settings): name, players, chat, the difficulty preset and every game setting (player, survival, world, progression, enemies, day and night), and user groups with their own passwords and rights (e.g. an Admin group that can kick/ban). Changing a game setting switches the preset to Custom, the only one where they count. A JSON mode edits the file as text. A copy of enshrouded_server.json is kept next to it at every save; applying restarts the server and then checks the game kept the values.
+- Docker images that write the name, password or player count from their environment at every start (indifferentbroccoli, mornedhels) get the same values in the compose env file, so a restart does not undo them.
+- **Docker server folder fix**: a server folder given as the host path (the volume's source) made the sync send EML into a folder that only existed inside the container. Bifrost now translates it through the container's volumes (or finds enshrouded_server.exe in them) and fixes the setting by itself.
+- The "EML is not loaded on the server" warning looked only at the container's environment, so images that set WINEDLLOVERRIDES in their start script got a false alarm. It now reads the running server process's environment.
+
+## Bifrost 2.1.3
 
 - An Enshrouded invite added by a Bifrost older than 2.0 was saved as a Valheim server (Valheim folder on Play, "BepInEx is not installed" on PLAY). A player's server now follows the game written in the server's list and switches by itself.
 - Play → How to join for Enshrouded says what to do in the game: Join → T → Ctrl+V (PLAY copies the address), and to keep Tailscale connected when the server is reached through it.

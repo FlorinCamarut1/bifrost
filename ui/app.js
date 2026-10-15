@@ -338,7 +338,7 @@ function renderSettings() {
   window.squire?.show(s.squire !== false);
   // restart / new join code only where Bifrost can do them
   $$('[data-act="fixcode"]').forEach(b => { b.hidden = !s.dockerServer; });
-  $('#btn-server-env').hidden = !(s.isAdmin && s.dockerServer);
+  $('#btn-server-env').hidden = !(s.isAdmin && (s.dockerServer || s.ensSettings));
   $$('[data-act="restart"]').forEach(b => { b.hidden = !s.canRestart; });
   renderServers();
   document.body.classList.toggle('role-admin', !!s.isAdmin); document.body.classList.toggle('role-player', !s.isAdmin);
@@ -723,6 +723,7 @@ $('#br-grid').addEventListener('click', e => {
 
 // detail drawer
 async function closeDrawer() {
+  if (S.drawer === 'ens:' && ensChanged() && !await confirmBox(L('Renunți la modificări?', 'Discard the changes?'), L('Ai setări de server nesalvate.', 'There are unsaved server settings.'), L('Renunță la ele', 'Discard them'))) return;
   if (S.drawer === 'env:' && envDirty() && !await confirmBox(L('Renunți la modificări?', 'Discard the changes?'), L('Ai setări de server nesalvate.', 'There are unsaved server settings.'), L('Renunță la ele', 'Discard them'))) return;
   if (String(S.drawer).startsWith('cfg:') && cfgDirty() && !await confirmBox('Renunți la modificări?', 'Ai modificări nesalvate în configurare.', 'Renunță la ele')) return;
   S.drawer = null; $('#drawer').hidden = true; $('#drawer-bg').hidden = true;
@@ -1032,7 +1033,7 @@ async function saveServerEnv() {
   else toast(L('Salvat. Se aplică la următoarea recreare a containerului.', 'Saved. It applies at the next container recreate.'), 'ok');
   openServerEnv();
 }
-$('#btn-server-env').onclick = () => openServerEnv();
+$('#btn-server-env').onclick = () => S.settings.ensSettings ? openEnsSettings() : openServerEnv();
 $('#drawer-body').addEventListener('input', e => {
   if (S.drawer !== 'env:') return;
   if (e.target.id === 'env-raw') { ENV.rawText = e.target.value; const bar = $('#env-bar'); if (bar) renderServerEnvBar(); return; }
@@ -1059,6 +1060,141 @@ $('#drawer-body').addEventListener('click', async e => {
   }
   if (e.target.closest('#env-discard')) { Object.assign(ENV, { rawText: null, changes: {} }); renderServerEnv(); return; }
   if (e.target.closest('#env-save')) saveServerEnv();
+});
+
+// ---------- Enshrouded: the server's enshrouded_server.json (lib/enssettings.js) ----------
+// The drawer edits a copy of the whole file (ENS.edit); unknown keys ride along untouched.
+const ENS = { file: null, text: null, json: null, edit: null, schema: null, env: null, raw: false, rawText: null, busy: false, players: null, pendingEnv: false };
+const ensGet = (o, p) => p.split('.').reduce((x, k) => x?.[k], o);
+function ensSet(o, p, v) { const ks = p.split('.'); let x = o; for (const k of ks.slice(0, -1)) x = x[k] ??= {}; x[ks[ks.length - 1]] = v; }
+const ensDiff = (a, b, base = '', out = []) => {
+  if (a && b && typeof a === 'object' && typeof b === 'object') { for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) ensDiff(a[k], b[k], base ? `${base}.${k}` : k, out); }
+  else if (JSON.stringify(a) !== JSON.stringify(b)) out.push(base);
+  return out;
+};
+const ensChanged = () => ENS.raw ? (ENS.rawText !== null && ENS.rawText !== ENS.text) : ensDiff(ENS.json, ENS.edit).length;
+async function openEnsSettings() {
+  S.drawer = 'ens:';
+  $('#drawer').hidden = false; $('#drawer-bg').hidden = false; $('#drawer').scrollTop = 0;
+  $('#drawer-body').innerHTML = `<div class="empty">${L('se încarcă...', 'loading...')}</div>`;
+  const r = await window.vp.act('ensRead');
+  if (S.drawer !== 'ens:') return;
+  if (!r.ok) { $('#drawer-body').innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
+  Object.assign(ENS, { file: r.file, text: r.text, json: r.json, edit: JSON.parse(JSON.stringify(r.json)), schema: r.schema, env: r.env, raw: false, rawText: null, busy: false, players: r.players, pendingEnv: r.pendingEnv });
+  renderEns();
+}
+// one setting: p = path in the json, type = text | password | number | bool | enum | factor | minutes
+function ensRow(p, type, label, hint, x = {}) {
+  const v = ensGet(ENS.edit, p), changed = JSON.stringify(v) !== JSON.stringify(ensGet(ENS.json, p));
+  let ctl;
+  if (type === 'bool') ctl = `<span class="switch"><input type="checkbox" data-ens="${p}" data-t="bool" ${v ? 'checked' : ''}><span></span></span>`;
+  else if (type === 'enum') ctl = `<select class="select" data-ens="${p}" data-t="enum">${(x.options || []).concat(x.options?.includes(v) || v === undefined ? [] : [v]).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  else if (type === 'minutes') ctl = `<input class="txt num-in" data-ens="${p}" data-t="minutes" inputmode="decimal" value="${v === undefined ? '' : +(v / ENS.schema.MIN).toFixed(2)}">`;
+  else if (type === 'factor' || type === 'number') ctl = `<input class="txt num-in" data-ens="${p}" data-t="${type}" inputmode="decimal" value="${v === undefined ? '' : esc(String(v))}">`;
+  else ctl = `<input class="txt" data-ens="${p}" data-t="text" type="${type === 'password' ? 'password' : 'text'}" value="${esc(v ?? '')}" spellcheck="false" autocomplete="off">`;
+  const range = x.min !== undefined ? `${x.min} – ${x.max}${type === 'factor' ? ' (1 = normal)' : ''}` : '';
+  return `<div class="cfg-row ${changed ? 'changed' : ''}" data-ensrow="${p}"><div class="cfg-l"><b>${esc(label)}</b><small>${esc([hint, range].filter(Boolean).join(' · '))}</small></div><div class="cfg-c">${ctl}</div></div>`;
+}
+function renderEns() {
+  const sc = ENS.schema, e = ENS.edit, envKeys = new Set(ENS.env?.keys || []);
+  const viaEnv = keys => keys.some(k => envKeys.has(k)) ? L(' Se scrie și în ', ' Also written to ') + keys.filter(k => envKeys.has(k)).join('/') + '.' : '';
+  const custom = e.gameSettingsPreset === 'Custom';
+  const known = new Set(sc.GAME.flatMap(([, rows]) => rows.map(r => r[0])));
+  const extra = Object.keys(e.gameSettings || {}).filter(k => !known.has(k));
+  const groups = (e.userGroups || []).map((g, i) => `<details class="cfg-sec" open><summary class="no-i18n">${L('Grup', 'Group')}: ${esc(g.name || '?')}${i === 0 ? ` <span class="muted">${L('(cine intră cu parola serverului)', '(who joins with the server password)')}</span>` : ''}</summary><div class="no-i18n">
+      ${ensRow(`userGroups.${i}.name`, 'text', L('Nume', 'Name'), '')}
+      ${ensRow(`userGroups.${i}.password`, 'password', L('Parolă', 'Password'), (i === 0 ? L('Parola serverului. Gol = fără parolă.', 'The server password. Empty = no password.') + viaEnv(sc.ENV_KEYS.groupPassword) : L('Cine intră cu parola asta primește drepturile grupului.', 'Whoever joins with this password gets this group\'s rights.')))}
+      ${sc.GROUP.map(([k, label]) => ensRow(`userGroups.${i}.${k}`, 'bool', label, '')).join('')}
+      ${ensRow(`userGroups.${i}.reservedSlots`, 'number', L('Locuri rezervate', 'Reserved slots'), '')}
+      ${i > 0 ? `<div class="row" style="justify-content:flex-end;padding:4px 12px 10px"><button class="btn ghost small danger" data-ensdelgroup="${i}">${L('Șterge grupul', 'Remove group')}</button></div>` : ''}
+    </div></details>`).join('');
+  const body = ENS.raw ? `<textarea class="cfg-raw no-i18n" id="ens-raw" spellcheck="false">${esc(ENS.rawText ?? ENS.text)}</textarea>` : `
+    <details class="cfg-sec" open><summary class="no-i18n">${L('General', 'General')}</summary><div class="no-i18n">
+      ${ensRow('name', 'text', L('Numele serverului', 'Server name'), L('Așa apare în lista din joc.', 'As shown in the game\'s server list.') + viaEnv(sc.ENV_KEYS.name))}
+      ${ensRow('slotCount', 'number', L('Jucători', 'Players'), L('Câți pot fi pe server deodată (1-16).', 'How many can be on at once (1-16).') + viaEnv(sc.ENV_KEYS.slotCount))}
+      ${'enableTextChat' in e ? ensRow('enableTextChat', 'bool', L('Chat text', 'Text chat'), '') : ''}
+      ${'enableVoiceChat' in e ? ensRow('enableVoiceChat', 'bool', L('Chat vocal', 'Voice chat'), '') : ''}
+      ${'voiceChatMode' in e ? ensRow('voiceChatMode', 'enum', L('Chat vocal: cine aude', 'Voice chat: who hears'), L('Proximity = cei din apropiere; Global = toți.', 'Proximity = players nearby; Global = everyone.'), { options: ['Proximity', 'Global'] }) : ''}
+    </div></details>
+    <details class="cfg-sec" open><summary class="no-i18n">${L('Dificultate', 'Difficulty')}</summary><div class="no-i18n">
+      ${ensRow('gameSettingsPreset', 'enum', L('Preset', 'Preset'), custom ? L('Custom: contează valorile de mai jos.', 'Custom: the values below count.') : L('Valorile de mai jos se aplică doar cu Custom - schimbă una și trec singur pe Custom.', 'The values below only apply with Custom - change one and it switches to Custom by itself.'), { options: sc.PRESETS })}
+    </div></details>
+    ${sc.GAME.map(([g, rows]) => `<details class="cfg-sec ${custom ? '' : 'ens-dim'}" open><summary class="no-i18n">${esc(g)}</summary><div class="no-i18n">${rows.filter(r => e.gameSettings && r[0] in e.gameSettings).map(([k, type, label, hint, x]) => ensRow(`gameSettings.${k}`, type, label, hint, x)).join('')}</div></details>`).join('')}
+    ${extra.length ? `<details class="cfg-sec ${custom ? '' : 'ens-dim'}" open><summary class="no-i18n">${L('Alte setări de joc', 'Other game settings')}</summary><div class="no-i18n">${extra.map(k => { const v = e.gameSettings[k]; return ensRow(`gameSettings.${k}`, typeof v === 'boolean' ? 'bool' : typeof v === 'number' ? 'number' : 'text', k, ''); }).join('')}</div></details>` : ''}
+    ${groups}
+    <div class="row" style="padding:10px 2px"><button class="btn small" id="ens-addgroup">${L('＋ Grup nou (ex. Admin)', '＋ New group (e.g. Admin)')}</button><span class="muted small" style="margin-left:10px">${L('Un grup cu altă parolă, de ex. pentru dat kick/ban.', 'A group with its own password, e.g. to kick/ban.')}</span></div>`;
+  const n = ensChanged();
+  $('#drawer-body').innerHTML = `
+    <div class="cfg-head"><h2>${L('Setări server', 'Server settings')}</h2><div class="muted"><span class="no-i18n">${esc(ENS.file)}</span> · ${L('se aplică la repornirea serverului', 'applied when the server restarts')}${ENS.pendingEnv ? ` · <b style="color:var(--amber)">${L('salvate, neaplicate încă', 'saved, not applied yet')}</b> <button class="btn small" id="ens-apply">${L('Aplică acum', 'Apply now')}</button>` : ''}</div></div>
+    <div class="cfg-tools"><span class="muted small">${L('O copie a fișierului rămâne lângă el la fiecare salvare.', 'A copy of the file is kept next to it at every save.')}</span>
+      <div class="seg" id="ens-mode"><button class="${ENS.raw ? '' : 'on server'}" data-mode="form">${L('Setări', 'Settings')}</button><button class="${ENS.raw ? 'on server' : ''}" data-mode="raw">JSON</button></div></div>
+    <div id="cfg-body">${body}</div>
+    <div class="cfg-bar" id="ens-bar"><span></span>
+      <div class="row gap"><button class="btn ghost small" id="ens-discard">${L('Renunță', 'Discard')}</button><button class="btn primary ${ENS.busy ? 'working' : ''}" id="ens-save">${ENS.busy ? L('Salvez...', 'Saving...') : L('Salvează', 'Save')}</button></div></div>`;
+  renderEnsBar();
+}
+function renderEnsBar() {
+  const bar = $('#ens-bar'); if (!bar) return;
+  const n = ensChanged();
+  bar.querySelector('span').textContent = n ? L(`${n} modificări nesalvate`, `${n} unsaved ${n === 1 ? 'change' : 'changes'}`) : L('Nicio modificare', 'No changes');
+  bar.querySelector('span').className = n ? '' : 'muted';
+  $('#ens-discard').disabled = !n; $('#ens-save').disabled = !n || ENS.busy;
+}
+async function saveEns() {
+  if (ENS.busy) return;
+  ENS.busy = true; renderEnsBar(); $('#ens-save').classList.add('working');
+  const r = await window.vp.act('ensSave', ENS.raw ? { text: ENS.rawText, expect: ENS.text } : { json: ENS.edit, expect: ENS.text });
+  ENS.busy = false;
+  if (!r.ok) { toast(r.error, 'error'); if (/changed on the server/.test(r.error)) openEnsSettings(); else renderEns(); return; }
+  if (r.unchanged) { toast(L('Nimic de salvat.', 'Nothing to save.')); openEnsSettings(); return; }
+  const p = ENS.players;
+  const now = await confirmBox(L('Aplici acum?', 'Apply now?'),
+    L(`Salvat (${r.changed.length} ${r.changed.length === 1 ? 'setare' : 'setări'}). Ca să se aplice, serverul repornește (~1-3 minute)${p ? ` - ${p} jucători online vor fi deconectați` : ''}. Poți aplica și mai târziu, de aici sau cu Restart.`,
+      `Saved (${r.changed.length} ${r.changed.length === 1 ? 'setting' : 'settings'}). To apply them the server restarts (~1-3 minutes)${p ? ` - ${p} ${p === 1 ? 'player' : 'players'} online will be disconnected` : ''}. You can also apply them later, from here or with Restart.`),
+    L('Repornește acum', 'Restart now'));
+  if (now) { const a = await window.vp.act('ensApply'); toast(a.ok ? L('Se aplică - serverul repornește în fundal.', 'Applying - the server restarts in the background.') : a.error, a.ok ? 'ok' : 'error'); }
+  else toast(L('Salvat. Se aplică la următoarea repornire a serverului.', 'Saved. It applies at the next server restart.'), 'ok');
+  openEnsSettings();
+}
+$('#drawer-body').addEventListener('input', e => {
+  if (S.drawer !== 'ens:') return;
+  if (e.target.id === 'ens-raw') { ENS.rawText = e.target.value; renderEnsBar(); return; }
+  const p = e.target.dataset?.ens; if (!p) return;
+  const t = e.target.dataset.t, raw = e.target.value;
+  let v;
+  if (t === 'bool') v = e.target.checked;
+  else if (t === 'enum' || t === 'text') v = raw;
+  else { const n = parseFloat(String(raw).replace(',', '.')); if (!isFinite(n)) { e.target.closest('.cfg-row')?.classList.add('invalid'); return; } v = t === 'minutes' ? Math.round(n * ENS.schema.MIN) : t === 'number' && /slotCount|reservedSlots/.test(p) ? Math.round(n) : n; }
+  e.target.closest('.cfg-row')?.classList.remove('invalid');
+  ensSet(ENS.edit, p, v);
+  // a game setting only counts with the Custom preset
+  let redraw = false;
+  if (p.startsWith('gameSettings.') && ENS.edit.gameSettingsPreset !== 'Custom') { ENS.edit.gameSettingsPreset = 'Custom'; redraw = true; toast(L('Preset trecut pe Custom, ca valoarea să conteze.', 'Preset switched to Custom so the value counts.')); }
+  if (p === 'gameSettingsPreset' || /userGroups\.\d+\.name/.test(p)) redraw = true;
+  if (redraw && e.target.tagName !== 'INPUT') { const y = $('#drawer').scrollTop; renderEns(); $('#drawer').scrollTop = y; return; }
+  if (redraw && e.target.tagName === 'INPUT' && p.startsWith('gameSettings.')) { const y = $('#drawer').scrollTop, id = p; renderEns(); $('#drawer').scrollTop = y; const el = $(`#cfg-body [data-ens="${id}"]`); if (el && el.type !== 'checkbox') { el.focus(); el.setSelectionRange?.(el.value.length, el.value.length); } return; }
+  $(`#cfg-body [data-ensrow="${p}"]`)?.classList.toggle('changed', JSON.stringify(ensGet(ENS.edit, p)) !== JSON.stringify(ensGet(ENS.json, p)));
+  renderEnsBar();
+});
+$('#drawer-body').addEventListener('click', async e => {
+  if (S.drawer !== 'ens:') return;
+  const md = e.target.closest('#ens-mode button');
+  if (md) {
+    const raw = md.dataset.mode === 'raw'; if (raw === ENS.raw) return;
+    if (ensChanged() && !await confirmBox(L('Renunți la modificări?', 'Discard the changes?'), L('Ca să schimbi modul de editare, salvează sau renunță la modificări.', 'To switch the editing mode, save or discard the changes.'), L('Renunță la ele', 'Discard them'))) return;
+    Object.assign(ENS, { raw, rawText: null, edit: JSON.parse(JSON.stringify(ENS.json)) }); renderEns(); return;
+  }
+  if (e.target.closest('#ens-addgroup')) {
+    const names = new Set((ENS.edit.userGroups || []).map(g => g.name));
+    let name = 'Admin', i = 2; while (names.has(name)) name = `Admin${i++}`;
+    (ENS.edit.userGroups ||= []).push({ name, password: '', canKickBan: true, canAccessInventories: true, canEditWorld: true, canEditBase: true, canExtendBase: true, reservedSlots: 0 });
+    renderEns(); $('#drawer').scrollTop = $('#drawer').scrollHeight; return;
+  }
+  const del = e.target.closest('[data-ensdelgroup]');
+  if (del) { ENS.edit.userGroups.splice(+del.dataset.ensdelgroup, 1); renderEns(); return; }
+  if (e.target.closest('#ens-discard')) { Object.assign(ENS, { rawText: null, edit: JSON.parse(JSON.stringify(ENS.json)) }); renderEns(); return; }
+  if (e.target.closest('#ens-save')) { saveEns(); return; }
+  if (e.target.closest('#ens-apply')) { const a = await window.vp.act('ensApply'); toast(a.ok ? L('Se aplică - serverul repornește în fundal.', 'Applying - the server restarts in the background.') : a.error, a.ok ? 'ok' : 'error'); }
 });
 
 // ---------- player: home ----------

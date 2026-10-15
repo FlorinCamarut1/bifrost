@@ -41,6 +41,7 @@ const { syncConfigs, SKIP: CFG_SKIP, safeRel } = require('./lib/serversync');
 const bepcfg = require('./lib/bepcfg');
 const sharedcfg = require('./lib/sharedcfg');
 const serverenv = require('./lib/serverenv');
+const enssettings = require('./lib/enssettings');
 const { metadata: dllMetadata } = require('./lib/dllmeta');
 const a2s = require('./lib/a2s');
 const tsprofile = require('./lib/tsprofile');
@@ -188,7 +189,7 @@ const publicSettings = () => {
       autoPublish: s.autoPublish, publishAddress: s.publishAddress, publishPassword: !!s.publishPassword, hasToken: !!s.tsTokenEnc,
       listPassword: s.role === 'player' && !!manifest?.server?.password,
       // dockerServer = the valheim-server image (join codes, server settings); other games' containers only restart
-      canRestart: !!(s.conn && (s.conn.type === 'ssh-docker' || s.conn.restartCmd)), dockerServer: s.conn?.type === 'ssh-docker' && isValheim(s),
+      canRestart: !!(s.conn && (s.conn.type === 'ssh-docker' || s.conn.restartCmd)), dockerServer: s.conn?.type === 'ssh-docker' && isValheim(s), ensSettings: s.role === 'admin' && !!s.conn && gdef(s).id === 'enshrouded',
       directJoin: s.directJoin !== false, joinAddress: s.joinAddress || '', hasJoinPass: !!dec(s.joinPassEnc), joinPassBroken: !!s.joinPassEnc && !dec(s.joinPassEnc), joinTarget: joinTarget(), friendAddress: friendAddress(), friendAuto: !s.joinAddress && !!friendAddress(), viaTailscale: isTailscaleAddr(friendAddress()), tailscale: tsLocal } : {}),
   };
 };
@@ -1051,13 +1052,20 @@ function syncGameOpts() {
 let loaderEnvWarned = false;
 async function syncLoader(tr) {
   if (gdef().loader !== 'eml') return false;
+  await fixDockerServerDir();
+  tr = transport();
   if (!tr.serverDir) { log('  EML is not put on the server: the connection has no server folder (where enshrouded_server.exe is)', 'error'); return false; }
   const pr = getProfile(), files = pr.loaderFiles();
   if (!files.length) return false;
-  // Wine / Proton only loads the proxy when told to (mornedhels/enshrouded-server: environment WINEDLLOVERRIDES)
+  // Wine / Proton only loads the proxy when told to (WINEDLLOVERRIDES dbghelp=n). Some images set it in their start
+  // script (indifferentbroccoli), others take it from the container's environment (mornedhels): the running server
+  // process's own environment is what counts. It is read on the host (docker top gives the host pids; root inside the
+  // container may not read them) and only when readable: down or unreadable = no warning
   if (tr.docker && !loaderEnvWarned) {
-    const env = await tr.run('printf "%s" "$WINEDLLOVERRIDES"', { timeout: 20000 }).catch(() => null);
-    if (env !== null && !/dbghelp\s*=\s*n/i.test(env)) {
+    const exe = gdef().server?.exe || 'enshrouded_server.exe';
+    const env = await tr.ssh(`for p in $(docker top ${shq(tr.conn.container)} -eo pid,args | grep -F ${shq(exe)} | awk '{print $1}'); do e=$(tr '\\0' '\\n' < /proc/$p/environ 2>/dev/null) && { echo READ; echo "$e" | grep '^WINEDLLOVERRIDES='; }; done; echo END`, { timeout: 20000 }).catch(() => null);
+    const lines = env === null ? [] : env.split('\n').filter(l => l.startsWith('WINEDLLOVERRIDES='));
+    if (env !== null && /READ/.test(env) && !lines.some(l => /dbghelp\s*=\s*n/i.test(l))) {
       loaderEnvWarned = true;
       log('  the server container has no WINEDLLOVERRIDES=dbghelp=native,builtin - Wine will not load EML, so the server runs without mods. Add it to the container\'s environment (docker compose) and recreate it.', 'error');
       notify('Bifrost: EML is not loaded on the server', 'Add WINEDLLOVERRIDES=dbghelp=native,builtin to the container environment.', 'warn');
@@ -1084,6 +1092,9 @@ async function syncNow(reason) {
     if (reason === 'manual') toast('Serverul repornește acum - sincronizez imediat după.', 'info');
     return;
   }
+  // (the mods folder comes from the server folder: a host path is fixed before the transport is made)
+  await fixDockerServerDir();
+  if (job) return;
   const manual = reason === 'manual', tr = transport();
   const sig = signature();
   changedAt = null; watch.retryAt = null;
@@ -1406,8 +1417,12 @@ async function deleteConfigs(rels) {
 }
 // ---------- the server's own settings (valheim-server image: the compose env_file) ----------
 async function serverEnvLocate() {
-  const s = srv(), tr = transport();
+  const tr = transport();
   if (!isAdmin() || !tr?.valheimImage) throw new Error('Only for Docker servers (valheim-server image) reached over SSH.');
+  return composeEnvFile(tr);
+}
+// the compose env_file of a Docker container (the last one wins when there are several)
+async function composeEnvFile(tr) {
   const info = await tr.composeInfo();
   if (!info) throw new Error('The container was not started with docker compose - its variables cannot be edited from here.');
   const composeTexts = [];
@@ -1447,6 +1462,118 @@ function serverEnvApply() {
     notify('Bifrost', r.joinCode ? `Server settings applied - join code ${r.joinCode}` : 'Server settings applied');
     setWatch('idle', 'up to date'); pollStatus(); schedulePublish('server settings');
   }).catch(e => { log(`■ Applying the server settings failed: ${e.message}`, 'error'); toast(e.message, 'error'); setWatch('error', 'error'); });
+  return { ok: true, started: true };
+}
+
+// ---------- Enshrouded: the server's enshrouded_server.json (lib/enssettings.js) ----------
+const ENS_FILE = 'enshrouded_server.json';
+const shq = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
+// ssh-docker paths are the container's: a server folder written as the HOST path (the volume's source) sent EML into a
+// folder that exists only inside the container (2026-10-15) - it is translated through the container's volumes, or
+// looked up there by the server's exe
+const dirChecked = new Set();
+async function fixDockerServerDir(s = srv()) {
+  if (!s || isValheim(s) || s.conn?.type !== 'ssh-docker' || dirChecked.has(s.id)) return;
+  dirChecked.add(s.id);
+  const tr = transport(s), exe = gdef(s).server?.exe, old = tr.serverDir;
+  if (!exe) return;
+  const has = async d => !!d && /yes/.test(await tr.run(`[ -f ${shq(`${d}/${exe}`)} ] && echo yes || echo no`, { timeout: 20000 }).catch(() => ''));
+  try {
+    if (await has(old)) return;
+    const mounts = await tr.mounts();
+    const cands = [];
+    for (const m of mounts) if (old && (old === m.src || old.startsWith(m.src + '/'))) cands.push(m.dst + old.slice(m.src.length));
+    for (const m of mounts) {
+      const out = await tr.run(`find ${shq(m.dst)} -maxdepth 3 -name ${shq(exe)} 2>/dev/null | head -n1`, { timeout: 30000 }).catch(() => '');
+      if (out.trim()) cands.push(path.posix.dirname(out.trim()));
+    }
+    let found = null;
+    for (const c of cands) if (await has(c)) { found = c; break; }
+    if (!found) { log(`${gdef(s).name} server: ${old || '(no folder)'} has no ${exe} inside the container - set the server folder in Settings → Connection (the path inside the container)`, 'error'); return; }
+    s.conn.serverDir = found; saveSettings(); send('settings', publicSettings());
+    log(`${gdef(s).name} server folder: ${old || '(none)'} → ${found} (the path inside the container)`, 'done');
+    // what went to the old path lived only in the container's own layer, never in the server's folder
+    if (old && !mounts.some(m => old === m.dst || old.startsWith(m.dst + '/'))) await tr.run(`rm -rf ${shq(`${old}/dbghelp.dll`)} ${shq(`${old}/mods`)}`, { timeout: 20000 }).catch(() => { });
+  } catch (e) { log(`server folder check: ${e.message}`, 'error'); }
+}
+async function ensLocate() {
+  const s = srv();
+  if (!isAdmin() || gdef(s).id !== 'enshrouded' || !s.conn) throw new Error('Only for Enshrouded servers you run (admin).');
+  await fixDockerServerDir(s);
+  const tr = transport(s);
+  if (!tr.serverDir) throw new Error('The connection has no server folder (where enshrouded_server.exe is) - set it in Settings → Connection.');
+  return { s, tr };
+}
+// the compose env_file and the variables of it the image writes into the json at start
+async function ensEnv(tr) {
+  if (!tr.docker) return null;
+  let env; try { env = await composeEnvFile(tr); } catch { return null; }
+  const text = await tr.hostRead(env.file).catch(() => null);
+  if (text === null) return null;
+  const image = await tr.image().catch(() => '');
+  return { file: env.file, text, vars: serverenv.parse(text), image, always: /indifferentbroccoli\/enshrouded/i.test(image) };
+}
+async function ensRead() {
+  const { tr } = await ensLocate();
+  const text = (await tr.read(tr.serverDir, ENS_FILE)).toString('utf8');
+  let json; try { json = JSON.parse(text); } catch (e) { throw new Error(`${ENS_FILE} is not valid JSON: ${e.message}`); }
+  const env = await ensEnv(tr);
+  return { ok: true, file: `${tr.serverDir}/${ENS_FILE}`, text, json, players: status.players ?? null,
+    env: env ? { file: env.file, keys: env.vars.map(v => v.key) } : null,
+    schema: { GAME: enssettings.GAME, GROUP: enssettings.GROUP, PRESETS: enssettings.PRESETS, MIN: enssettings.MIN, ENV_KEYS: enssettings.ENV_KEYS }, pendingEnv: !!srv().ensEnvPending };
+}
+async function ensSave({ json, text, expect }) {
+  const { s, tr } = await ensLocate();
+  const cur = (await tr.read(tr.serverDir, ENS_FILE)).toString('utf8');
+  if (expect !== undefined && cur !== expect) throw new Error('The file changed on the server meanwhile - it was reloaded, make the change again.');
+  let next = json;
+  if (typeof text === 'string') { try { next = JSON.parse(text); } catch (e) { throw new Error(`Not valid JSON: ${e.message}`); } }
+  const why = enssettings.validate(next);
+  if (why) throw new Error(why);
+  const before = JSON.parse(cur), changed = enssettings.diff(before, next);
+  if (!changed.length) return { ok: true, unchanged: true };
+  // the image writes these from its environment at every start: the env_file gets the same values
+  const env = await ensEnv(tr), envChanges = {};
+  if (env) {
+    const want = { name: next.name, groupPassword: next.userGroups?.[0]?.password ?? '', slotCount: next.slotCount };
+    const has = new Set(env.vars.map(v => v.key)), cur2 = Object.fromEntries(env.vars.map(v => [v.key, v.value]));
+    for (const [field, keys] of Object.entries(enssettings.ENV_KEYS)) {
+      if (want[field] === undefined) continue;
+      const v = String(want[field]);
+      let used = keys.filter(k => has.has(k));
+      if (!used.length && env.always) used = [keys[0]];
+      for (const k of used) if ((cur2[k] ?? '') !== v) envChanges[k] = v;
+    }
+  }
+  await tr.writeFile(tr.serverDir, ENS_FILE, enssettings.stringify(next));
+  if (Object.keys(envChanges).length) { await tr.hostWriteWithBackup(env.file, serverenv.apply(env.text, envChanges)); s.ensEnvPending = true; saveSettings(); }
+  const shown = changed.map(p => /password/i.test(p) ? `${p}=***` : p);
+  log(`Server settings changed (${ENS_FILE}${Object.keys(envChanges).length ? ` + ${path.posix.basename(env.file)}: ${Object.keys(envChanges).join(', ')}` : ''}, backups kept next to them): ${shown.join(', ')}`, 'done');
+  return { ok: true, changed: shown, env: Object.keys(envChanges) };
+}
+// restart (recreate when the env_file changed); then check the server kept what was written - the game rewrites its
+// json at start and drops what it does not accept
+function ensApply() {
+  if (restarting) return { ok: false, error: 'The server is restarting already - wait for it to finish.' };
+  if (job) return { ok: false, error: 'Already working - try again in a few seconds.' };
+  const s = srv(), recreate = !!s.ensEnvPending && transport(s)?.docker;
+  (async () => {
+    const tr = transport(s);
+    const wrote = JSON.parse((await tr.read(tr.serverDir, ENS_FILE)).toString('utf8'));
+    await restartServer({ recreate });
+    if (recreate) { s.ensEnvPending = false; saveSettings(); }
+    // up = answers the Steam query (at most ~4 minutes: the image checks for game updates first)
+    const a = a2s.parseAddress(queryAddress(s), gdef(s));
+    let up = false;
+    for (let i = 0; i < 48 && a && !up; i++) { await new Promise(r => setTimeout(r, 5000)); up = await a2s.info(a.host, a.queryPort, 2500).then(() => true, () => false); }
+    const now = JSON.parse((await transport(s).read(tr.serverDir, ENS_FILE)).toString('utf8'));
+    const lost = enssettings.diff(wrote, now).filter(p => !/password/i.test(p));
+    if (lost.length) log(`  the server changed these back at start: ${lost.join(', ')}`, 'error');
+    const text = up ? 'Server settings applied' : 'Server settings written - the server has not answered yet';
+    log(`■ ${text}`, up ? 'done' : 'error');
+    watch.lastResult = { kind: up ? 'ok' : 'wait', text, what: '' };
+    notify('Bifrost', text); setWatch('idle', 'up to date'); pollStatus(); schedulePublish('server settings');
+  })().catch(e => { log(`■ Applying the server settings failed: ${e.message}`, 'error'); toast(e.message, 'error'); setWatch('error', 'error'); });
   return { ok: true, started: true };
 }
 
@@ -2064,6 +2191,9 @@ async function action(name, arg) {
     case 'serverEnvRead': try { return await serverEnvRead(); } catch (e) { return { ok: false, error: e.message }; }
     case 'serverEnvSave': try { return await serverEnvSave(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
     case 'serverEnvApply': return serverEnvApply();
+    case 'ensRead': try { return await ensRead(); } catch (e) { return { ok: false, error: e.message }; }
+    case 'ensSave': try { return await ensSave(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
+    case 'ensApply': return ensApply();
     case 'deleteConfigs': try { return await deleteConfigs(arg); } catch (e) { return { ok: false, error: e.message }; }
     case 'saveConfig': try { return await saveConfig(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
     case 'restartIdle': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, what: 'new configs' }); } catch (e) { return { ok: false, error: e.message }; }

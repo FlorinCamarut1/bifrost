@@ -418,6 +418,9 @@ body:not(.no-server) [data-need="none"] { display: none !important; }
 .cfg-sec > summary .muted { font-weight: 500; margin-left: 6px; font-size: 12px; }
 .cfg-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 210px); gap: 14px; padding: 10px 12px; border-radius: 10px; border: 1px solid transparent; align-items: start; }
 .cfg-row:nth-child(even) { background: #ffffff05; }
+/* Enshrouded settings: game values that do not count until the preset is Custom */
+.ens-dim .cfg-row { opacity: .55; }
+.cfg-c .num-in { width: 110px; text-align: right; }
 .cfg-row.changed { border-color: #e6c47755; background: #e6c4770f; }
 .cfg-row.invalid { border-color: #ef6b6b99; background: #ef6b6b10; }
 .cfg-l b { display: block; font-size: 13px; overflow-wrap: anywhere; }
