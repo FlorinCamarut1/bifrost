@@ -1,4 +1,8 @@
-﻿## Bifrost 2.1.0
+﻿## Bifrost 2.1.1
+
+- Discover (Nexus) for Enshrouded stopped at the first 30 mods: scrolling down did not load the rest (it waited for the Thunderstore catalog, which Enshrouded never loads). A tall window that still shows the end of the list after a page now loads the next one too.
+
+## Bifrost 2.1.0
 
 - **Enshrouded without a port forward: Tailscale.** If the server's machine has Tailscale, Bifrost finds its address by itself and puts it in the server's list. Friends install Tailscale, accept the admin's share invite (Tailscale console → Machines → the server → Share) and press PLAY.
 - Enshrouded **PLAY copies the server's address**: in the game Join → press T → Ctrl+V. If this PC cannot reach the server, Bifrost says why: Tailscale missing, not connected, server not shared with you yet, server offline.

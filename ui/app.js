@@ -570,13 +570,16 @@ function renderBrowse(reset) {
     </div>`).join('');
   $('#br-more').textContent = !list.length ? 'Nimic găsit.' : list.length > shown.length ? L(`${shown.length} din ${list.length.toLocaleString(LOC())} - derulează pentru mai multe`, `${shown.length} of ${list.length.toLocaleString(LOC())} - scroll for more`) : L(`${list.length} moduri`, `${list.length} ${list.length === 1 ? 'mod' : 'mods'}`);
 }
-const moreObs = new IntersectionObserver(es => {
-  if (es.some(e => e.isIntersecting) && S.catalog && $('#page-browse').classList.contains('active')) {
-    const total = browseList().length;
-    if (S.src === 'nx') { if (!S.nx.loading && S.nx.list.length < S.nx.total) nexusSearch(false); return; }
-    if (S.blimit < total) { S.blimit += 60; renderBrowse(false); }
-  }
-}, { root: document.querySelector('main'), rootMargin: '600px' });
+// (Nexus pages do not need the Thunderstore catalog: Enshrouded never loads it, and its list stopped at 30)
+const moreObs = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); }, { root: document.querySelector('main'), rootMargin: '600px' });
+function loadMore() {
+  if (!$('#page-browse').classList.contains('active')) return;
+  if (S.src === 'nx') { if (!S.nx.loading && !S.nx.error && S.nx.list.length < S.nx.total) nexusSearch(false); return; }
+  if (S.catalog && S.blimit < browseList().length) { S.blimit += 60; renderBrowse(false); }
+}
+// the observer only speaks when "more" enters or leaves the margin: a page that leaves it still inside (a tall
+// window) would wait forever, so every render asks again
+const moreNear = () => { const m = $('#br-more'), main = document.querySelector('main'); return m.getBoundingClientRect().top < main.getBoundingClientRect().bottom + 600; };
 moreObs.observe($('#br-more'));
 
 let bTimer = null;
@@ -650,6 +653,7 @@ function renderNexus() {
       <div class="pk-foot"><span class="pk-stat" title="descărcări">${ICON_DL}${fmtNum(m.downloads)}</span><span class="pk-stat" title="endorsements">${ICON_STAR}${fmtNum(m.endorsements)}</span>${m.modCategory ? `<span class="nx-cat">${esc(m.modCategory.name)}</span>` : ''}${Date.parse(m.updatedAt) < NX_OUTDATED && S.settings.game?.outdated !== false ? '<span class="side-tag dep" title="Not updated since Ashlands (May 2024) - it may not work">outdated</span>' : ''}${nxButton(m)}</div>
     </div>`).join('');
   $('#br-more').textContent = !nx.list.length ? 'Nimic găsit.' : nx.list.length < nx.total ? `${nx.list.length} din ${nx.total.toLocaleString(LOC())} - derulează pentru mai multe` : `${nx.total} moduri`;
+  if (nx.list.length < nx.total && moreNear()) setTimeout(loadMore, 50);
 }
 async function nxInstall(modId, fileId) {
   const m = S.nx.list.find(x => x.modId === +modId) || S.nxDrawer;
