@@ -657,6 +657,13 @@ async function refreshManifest() {
     writeJson(listCache(), manifest);
     manifestErr = null;
     if (s.role === 'player' && manifest.server?.name && manifest.server.name !== s.name) { s.name = manifest.server.name; saveSettings(); }
+    // the list says which game the server is: an invite added by a Bifrost older than 2.0 was saved as Valheim (a
+    // friend's Enshrouded server showed the Valheim folder and "BepInEx is not installed", 2026-10-15)
+    if (s.role === 'player' && manifest.game && games.GAMES[manifest.game] && manifest.game !== gdef(s).id) {
+      log(`${s.name}: the server's list is for ${games.GAMES[manifest.game].name}, not ${gdef(s).name} - switched`, 'done');
+      s.game = manifest.game; saveSettings(); activate(s.id);
+      return manifest;
+    }
     if (s.role === 'player') { send('settings', publicSettings()); pollStatus(); }   // address / password from the list
   } catch (e) { manifestErr = e.message; }
   manifestAt = Date.now();

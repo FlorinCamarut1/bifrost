@@ -1,4 +1,9 @@
-﻿## Bifrost 2.1.2
+﻿## Bifrost 2.1.3
+
+- An Enshrouded invite added by a Bifrost older than 2.0 was saved as a Valheim server (Valheim folder on Play, "BepInEx is not installed" on PLAY). A player's server now follows the game written in the server's list and switches by itself.
+- Play → How to join for Enshrouded says what to do in the game: Join → T → Ctrl+V (PLAY copies the address), and to keep Tailscale connected when the server is reached through it.
+
+## Bifrost 2.1.2
 
 - Server menu: the game tag (ENSHROUDED) ran over the role. Each server now shows its name, with "role · game" under it; long names end in "...".
 - Discover for Enshrouded said "The Thunderstore catalog for Valheim" above the Nexus list after the catalog refreshed.

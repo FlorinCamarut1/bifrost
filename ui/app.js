@@ -1090,7 +1090,7 @@ function renderPlayer() {
   const direct = vh && S.settings.directJoin && !!S.settings.joinTarget;
   $('#pl-howto-direct').hidden = !direct; $('#pl-howto-manual').hidden = direct || !vh;
   $('#pl-howto-other').hidden = vh;
-  if (!vh) $('#pl-howto-other').innerHTML = L(`În joc: <b>Join</b> și caută serverul după nume (sau adresa de mai sus). Bifrost pornește ${esc(gameName())} prin Steam, cu EML și modurile serverului.`, `In game: <b>Join</b> and look the server up by name (or the address above). Bifrost starts ${esc(gameName())} through Steam with EML and the server's mods.`);
+  if (!vh) $('#pl-howto-other').innerHTML = L(`JOACĂ copiază adresa de mai sus și pornește ${esc(gameName())} prin Steam, cu EML și modurile serverului. În joc: <b>Join</b> → apasă <b>T</b> → <b>Ctrl+V</b> → Enter.${S.settings.viaTailscale ? ' Serverul e prin <b>Tailscale</b>: ține-l conectat cât joci.' : ''}`, `PLAY copies the address above and starts ${esc(gameName())} through Steam with EML and the server's mods. In game: <b>Join</b> → press <b>T</b> → <b>Ctrl+V</b> → Enter.${S.settings.viaTailscale ? ' The server is reached through <b>Tailscale</b>: keep it connected while you play.' : ''}`);
   $('#pl-game-label').textContent = gameName();
   $('#pl-game').innerHTML = P.game?.game ? esc(P.game.game) : '<span style="color:var(--red)">negăsit</span> · <a href="#" data-page-link="settings">alege folderul</a>';
 
