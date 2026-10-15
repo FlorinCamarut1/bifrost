@@ -298,6 +298,8 @@
         <label class="setting" data-role="admin"><div><b>Pune și parola în listă</b><small>Prietenii nu mai scriu parola: Bifrost-ul lor o trimite singur la JOACĂ. Oricine are linkul de invitație o poate citi.</small></div><span class="switch"><input type="checkbox" data-set="publishPassword"><span></span></span></label>
         <label class="vh-only setting"><div><b>Intră direct pe server la JOACĂ</b><small id="dj-state">Fără join code și fără parolă în joc: alegi caracterul, apeși Start și ești pe server.</small></div><span class="switch"><input type="checkbox" data-set="directJoin"><span></span></span></label>
         <label class="vh-only setting"><div><b>Adresa serverului</b><small>Gol = automat (din lista serverului sau din logurile lui). Ex. 1.2.3.4:2456 sau un nume DNS.</small></div><input data-set="joinAddress" class="txt" id="dj-addr" placeholder="automat" spellcheck="false"></label>
+        <label class="nv-only setting"><div><b>Adresa pentru prieteni</b><small id="fa-state">Gol = automat.</small></div><input data-set="joinAddress" class="txt" id="fa-addr" placeholder="automat" spellcheck="false"></label>
+        <div class="nv-only setting"><div><b>Tailscale</b><small id="ts-state">Fără port forward: serverul e partajat cu fiecare prieten din Tailscale.</small></div><div class="row gap"><button class="btn" id="btn-ts-check">Verifică</button><a class="btn ghost" href="#" id="ts-download" data-open="https://tailscale.com/download">Descarcă</a><a class="btn ghost" href="#" data-role="admin" data-open="https://login.tailscale.com/admin/machines">Partajează serverul</a></div></div>
         <div class="vh-only setting"><div><b>Parola serverului</b><small id="jp-state">Salvată criptat, doar pe PC-ul tău.</small></div><div class="row gap"><input type="password" id="jp-input" class="txt" placeholder="parola" autocomplete="off"><button class="btn" id="btn-jp-save">Salvează</button><button class="btn ghost" id="btn-jp-detect" data-role="admin">Ia de pe server</button><button class="btn ghost" id="btn-jp-clear">Șterge</button></div></div>
         <div class="setting"><div><b>Invitație</b><small id="set-invite">–</small></div><button class="btn" id="btn-copy-invite">Copiază linkul</button></div>
         <div class="vh-only setting"><div><b>Cod de profil Thunderstore</b><small>Pentru cine folosește r2modman / Thunderstore Mod Manager: aceleași moduri, fără update automat.</small></div><button class="btn" id="btn-export-code">Generează cod</button></div>
@@ -338,6 +340,7 @@
         <label class="setting"><div><b>Limba</b></div><select class="select" data-set="lang"><option value="en">English</option><option value="ro">Română</option></select></label>
         <label class="setting"><div><b id="lbl-autostart">Pornește cu Windows</b><small>Stă în tray, fără fereastră.</small></div><span class="switch"><input type="checkbox" data-set="startWithWindows"><span></span></span></label>
         <div class="setting"><div><b>Cache-ul descărcărilor</b><small id="cache-state">Modurile descărcate, ca reinstalările și profilurile noi să nu le mai descarce. Versiunile vechi se șterg singure.</small></div><button class="btn" id="btn-cache-clear">Golește</button></div>
+        <label class="setting"><div><b>Sir Bodo</b><small>Scutierul din colțul din stânga jos. Apasă pe el.</small></div><span class="switch"><input type="checkbox" data-set="squire"><span></span></span></label>
         <label class="setting"><div><b>Notificări</b><small>Update-uri, join code nou, erori.</small></div><span class="switch"><input type="checkbox" data-set="notifications"><span></span></span></label>
         <div class="row gap wrap" style="margin-top:12px"><button class="btn" data-act="open" data-arg="folder">Folderul aplicației</button><button class="btn" data-act="open" data-arg="profile">Profilul de moduri</button><button class="btn" data-act="open" data-arg="log">Jurnalul</button><button class="btn danger" data-act="quit">Închide complet</button></div>
         <p class="muted small" id="about"></p>
@@ -394,6 +397,7 @@
 <script src="vendor/marked.umd.js"></script>
 <script src="vendor/purify.min.js"></script>
 <script src="i18n.js"></script>
+<script src="squire.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

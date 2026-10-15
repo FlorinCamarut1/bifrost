@@ -24,7 +24,9 @@ const clock = t => new Date(t).toLocaleTimeString(LOC(), { hour: '2-digit', minu
 const cmpVer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 const hasUpdate = m => { const u = S.updates[m.name]; return !!(u && u.latest && m.version && cmpVer(u.latest, m.version) > 0); };
 
+let lastErrorAt = 0;
 function toast(text, kind = 'info') {
+  if (kind === 'error') { lastErrorAt = Date.now(); window.squire?.say('error'); }
   const el = document.createElement('div');
   el.className = `toast ${kind}`; el.textContent = text;
   $('#toasts').append(el);
@@ -78,7 +80,7 @@ function renderStatus() {
   $('#srv-players').textContent = pl;
   $('#srv-players-note').textContent = s.idle === true ? 'server gol' : s.idle === false ? 'trafic de jucători' : '';
   const addrs = (S.settings.addresses || '').split(/[;\n]/).map(x => x.split('=')).filter(x => x[1]).map(([k, v]) => [k.trim(), v.trim()]);
-  if (s.publicIp) addrs.push(['Public (prieteni)', s.publicIp]);
+  if (s.publicIp) addrs.push([s.viaTailscale ? L('Tailscale (prieteni)', 'Tailscale (friends)') : 'Public (prieteni)', s.publicIp]);
   $('#srv-addresses').innerHTML = addrs.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><code>${esc(v)}</code><button class="icon-btn" data-copy="${esc(v)}" title="Copiază"><svg class="ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button></div>`).join('');
   $('#srv-recent').innerHTML = (s.recent || []).length
     // the ones on the server right now first, with a green dot
@@ -94,7 +96,7 @@ function renderStatus() {
   // (a personal profile has no server; a server whose state is unknown shows nothing rather than "starting")
   const personal = !S.settings.isAdmin && !S.settings.server?.list;
   if (personal || s.unknown) tb = '';
-  else if (s.reachable && s.container === 'running') tb = `<span>${s.joinCode ? `${L('cod', 'code')} <b>${esc(s.joinCode)}</b>` : L('pornește...', 'starting...')}</span><span><b>${esc(pl)}</b> online</span>`;
+  else if (s.reachable && s.container === 'running') tb = `${s.joinCode ? `<span>${L('cod', 'code')} <b>${esc(s.joinCode)}</b></span>` : s.gameUp || S.settings.game?.id !== 'valheim' ? '' : `<span>${L('pornește...', 'starting...')}</span>`}<span><b>${esc(pl)}</b> online</span>`;
   else if (s.reachable === false) tb = '<span>server: fără conexiune</span>';
   $('#tb-status').innerHTML = tb;
 }
@@ -323,6 +325,17 @@ function renderSettings() {
       : `<span class="muted">${L('Nicio parolă salvată. Dacă serverul are parolă, scrie-o o dată aici.', 'No password saved. If the server has one, type it here once.')}</span>`;
     $('#btn-jp-clear').hidden = !s.hasJoinPass && !s.joinPassBroken;
   }
+  // Enshrouded: the address friends type in the game + Tailscale on this PC
+  if ($('#fa-state')) {
+    $('#fa-addr').placeholder = s.joinAddress ? '' : (s.friendAddress || ((s.lang || 'en') === 'en' ? window.bifrostI18n.t('automat') : 'automat'));
+    $('#fa-state').textContent = s.friendAddress
+      ? (s.isAdmin ? L(`Acum: ${s.friendAddress}${s.friendAuto ? ' (adresa Tailscale a serverului)' : ''}. Merge în lista serverului; la JOACĂ e copiată, în joc: Join → T → Ctrl+V.`, `Now: ${s.friendAddress}${s.friendAuto ? " (the server's Tailscale address)" : ''}. It goes in the server's list; PLAY copies it, in the game: Join → T → Ctrl+V.`)
+        : L(`Acum: ${s.friendAddress}. La JOACĂ e copiată, în joc: Join → T → Ctrl+V.`, `Now: ${s.friendAddress}. PLAY copies it, in the game: Join → T → Ctrl+V.`))
+      : s.isAdmin ? L('Gol = adresa Tailscale a serverului (dacă are Tailscale), altfel scrie IP:port-ul la care ajung prietenii.', "Empty = the server's Tailscale address (if it has Tailscale), else write the IP:port friends reach.")
+        : L('Lista serverului nu are adresa: cere-o adminului și scrie-o aici.', "The server's list has no address: ask the admin and write it here.");
+    renderTailscale();
+  }
+  window.squire?.show(s.squire !== false);
   // restart / new join code only where Bifrost can do them
   $$('[data-act="fixcode"]').forEach(b => { b.hidden = !s.dockerServer; });
   $('#btn-server-env').hidden = !(s.isAdmin && s.dockerServer);
@@ -374,6 +387,24 @@ $('#btn-jp-detect').onclick = async () => {
   const b = $('#btn-jp-detect'); b.disabled = true;
   const r = await window.vp.act('detectJoinPassword'); b.disabled = false;
   toast(!r.ok ? r.error : r.found ? 'Am luat parola de pe server (salvată criptat).' : 'Serverul nu are parolă.', r.ok ? 'ok' : 'error');
+};
+// Tailscale on this PC (the last check main made, or the one this button asks for)
+function renderTailscale(r) {
+  const s = S.settings, ts = (r && r.ts) || s.tailscale, el = $('#ts-state');
+  if (!el) return;
+  $('#ts-download').hidden = !!(ts && ts.installed);
+  if (r && r.ok) { el.innerHTML = `<span style="color:var(--green)">${esc(L(`✓ Serverul răspunde (${r.addr}, ${r.players} online).`, `✓ The server answers (${r.addr}, ${r.players} online).`))}</span>`; return; }
+  if (r && r.text) { el.innerHTML = `<span style="color:var(--red)">${esc(r.text)}</span>`; return; }
+  el.textContent = !s.viaTailscale ? L('Fără port forward: adminul partajează mașina serverului cu fiecare prieten din Tailscale (Machines → Share).', "No port forward: the admin shares the server's machine with each friend in Tailscale (Machines → Share).")
+    : !ts ? L('Serverul e prin Tailscale. Apasă Verifică.', 'The server is reached through Tailscale. Press Check.')
+    : !ts.installed ? L('Serverul e prin Tailscale: instalează-l, conectează-te, apoi deschide linkul de invitație primit de la admin.', "The server is reached through Tailscale: install it, sign in, then open the invite link from the admin.")
+    : ts.state !== 'Running' ? L('Tailscale nu e conectat pe PC-ul ăsta.', 'Tailscale is not connected on this PC.')
+    : L('Tailscale e conectat.', 'Tailscale is connected.');
+}
+$('#btn-ts-check').onclick = async () => {
+  const b = $('#btn-ts-check'); b.disabled = true;
+  const r = await window.vp.act('checkReach'); b.disabled = false;
+  renderTailscale(r);
 };
 $('#btn-nexus-clear').onclick = async () => { await window.vp.act('setNexusKey', null); toast('Cheia Nexus ștearsă.'); };
 document.addEventListener('click', e => { const o = e.target.closest('a[data-open]'); if (o && !o.closest('#drawer')) { e.preventDefault(); window.vp.act('open', o.dataset.open); } });
@@ -1409,15 +1440,21 @@ $('#btn-upd-dl').onclick = () => window.vp.act('open', S.appUpdate?.page || 'htt
 
 // ---------- events from main ----------
 window.vp.on((ch, d) => {
-  if (ch === 'status') { S.status = d; renderStatus(); }
+  if (ch === 'status') { if (d.players > (S.status?.players ?? d.players)) window.squire.say('join'); S.status = d; renderStatus(); }
+  else if (ch === 'reach') renderTailscale(d);
   else if (ch === 'mods') { S.profile = d; renderMods(); renderWatch(); renderBrowse(false); refreshDrawer(); renderPlayerMods(); }
   else if (ch === 'player') { S.player = d; renderPlayer(); renderSettingsGame(); }
   else if (ch === 'progress') renderProgress(d);
-  else if (ch === 'game') { S.game = d; renderPlayer(); }
+  else if (ch === 'game') { if (d.running && !S.game?.running) window.squire.say('play', true); S.game = d; renderPlayer(); }
   else if (ch === 'nexusPending') { S.nx.pending = d; window.vp.act('nexusInstalled').then(r => { S.nx.installed = r.installed; if (S.src === 'nx') renderNexus(); if (S.drawer && S.drawer.startsWith('nx:')) openNexusDrawer(S.nxDrawer.modId, true); }); }
   else if (ch === 'list') { S.list = d; renderList(); }
   else if (ch === 'appUpdate') { S.appUpdate = d; renderAppUpdate(); }
-  else if (ch === 'job') { S.job = d; renderWatch(); renderMods(); renderPlayer(); }
+  else if (ch === 'job') {
+    // Sir Bodo: off with the cart when a job starts, "delivered" when it ends without an error toast
+    if (d && !S.job) window.squire.say('sync');
+    else if (!d && S.job) setTimeout(() => { if (Date.now() - lastErrorAt > 3000) window.squire.say('done', true); }, 800);
+    S.job = d; renderWatch(); renderMods(); renderPlayer();
+  }
   else if (ch === 'queue') { S.queue = d; renderWatch(); }
   else if (ch === 'watch') { S.watch = d; renderWatch(); }
   else if (ch === 'log') addLog(d);
@@ -1434,6 +1471,7 @@ window.vp.on((ch, d) => {
   Object.assign(S, { settings: d.settings, profile: d.profile, status: d.status, job: d.job, watch: d.watch, updates: d.updates, modpack: d.modpack, game: d.game || {}, queue: d.queue || [], installing: d.installing || {}, catalogFetched: d.catalogFetched, player: d.player, list: d.list || {}, appUpdate: d.appUpdate });
   logEntries = d.log; $('#log').innerHTML = d.log.map(logLine).join('\n') + '\n';
   $('#about').textContent = `Bifrost ${d.version}${d.settings.packaged ? '' : ' (din sursă)'} · ${(d.settings.servers || []).length} servere`;
+  window.squire.mount();
   applyLang();
   renderSettings();
   renderHowto();

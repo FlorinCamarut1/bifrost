@@ -79,7 +79,7 @@ const slug = s => String(s || 'server').toLowerCase().normalize('NFD').replace(/
 
 const GLOBAL_DEFAULTS = {
   // gameDir: Valheim's folder (from before other games); gameDirs: { <game id>: folder } for the others
-  lang: null, notifications: true, startWithWindows: null, gameDir: null, gameDirs: {}, shortcutsV2: false, bepConsoleMode: 'nowarn',
+  lang: null, notifications: true, startWithWindows: null, gameDir: null, gameDirs: {}, shortcutsV2: false, bepConsoleMode: 'nowarn', squire: true,
   nexusKeyEnc: null, nexusUser: null, githubTokenEnc: null, githubUser: null, activeServer: null, servers: [], shortcutTarget: null,
 };
 const SERVER_DEFAULTS = {
@@ -93,6 +93,7 @@ const SERVER_DEFAULTS = {
   recommended: {}, nexusChosen: {},
   // PLAY joins the server straight away (Valheim's +connect / -password); address empty = from the list / server logs
   directJoin: true, joinAddress: '', joinPassEnc: null,
+  tailscaleIp: null,   // admin, games without a relay: the server machine's Tailscale address (friendAddress)
 };
 // settings.json that does not parse (a crash while writing, a bad hand edit) is never replaced with empty defaults:
 // the last good copy (settings.json.bak, refreshed at every start) is used and the broken file is kept beside it
@@ -188,7 +189,7 @@ const publicSettings = () => {
       listPassword: s.role === 'player' && !!manifest?.server?.password,
       // dockerServer = the valheim-server image (join codes, server settings); other games' containers only restart
       canRestart: !!(s.conn && (s.conn.type === 'ssh-docker' || s.conn.restartCmd)), dockerServer: s.conn?.type === 'ssh-docker' && isValheim(s),
-      directJoin: s.directJoin !== false, joinAddress: s.joinAddress || '', hasJoinPass: !!dec(s.joinPassEnc), joinPassBroken: !!s.joinPassEnc && !dec(s.joinPassEnc), joinTarget: joinTarget() } : {}),
+      directJoin: s.directJoin !== false, joinAddress: s.joinAddress || '', hasJoinPass: !!dec(s.joinPassEnc), joinPassBroken: !!s.joinPassEnc && !dec(s.joinPassEnc), joinTarget: joinTarget(), friendAddress: friendAddress(), friendAuto: !s.joinAddress && !!friendAddress(), viaTailscale: isTailscaleAddr(friendAddress()), tailscale: tsLocal } : {}),
   };
 };
 
@@ -729,7 +730,67 @@ function joinTarget(s = srv()) {
   const withPort = a => { a = String(a || '').trim(); return !a ? null : /:\d+$/.test(a) ? a : `${a}:2456`; };
   return withPort(s.joinAddress) || withPort(s.role === 'player' ? manifest?.server?.address : status.publicIp);
 }
-// the admin's Docker server knows its own password (SERVER_PASS of the valheim-server image)
+// ---------- Enshrouded (games without a join command line): the address friends type in the game. There is no relay
+// like Valheim's crossplay, so the server is reached directly: a forwarded port, or Tailscale (the admin shares the
+// server's machine with each friend in the Tailscale console; nothing is opened to the internet).
+const isTailscaleAddr = a => /^(100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+|[\w-]+(\.[\w-]+)*\.ts\.net)(:\d+)?$/i.test(String(a || '').trim());
+function friendAddress(s = srv()) {
+  if (!s || isValheim(s)) return null;
+  const port = gdef(s).gamePort;
+  const withPort = a => { a = String(a || '').trim(); return !a ? null : /:\d+$/.test(a) ? a : `${a}:${port}`; };
+  return withPort(s.joinAddress) || withPort(s.role === 'player' ? manifest?.server?.address : s.tailscaleIp);
+}
+// the admin's server machine's Tailscale address (asked once per Bifrost start); the default address for friends
+const tsAsked = new Set();
+async function detectTailscaleIp(s = srv()) {
+  if (!s || s.role !== 'admin' || isValheim(s) || !s.conn || tsAsked.has(s.id)) return;
+  tsAsked.add(s.id);
+  let out = null;
+  try {
+    if (s.conn.type === 'ssh' || s.conn.type === 'ssh-docker') out = await transport(s).ssh('tailscale ip -4 2>/dev/null | head -n1', { timeout: 20000 });
+    else if (s.conn.type === 'local') out = (await localTailscale()).self;
+  } catch { }
+  const ip = (String(out || '').match(/\b100\.\d+\.\d+\.\d+\b/) || [])[0] || null;
+  if (ip === (s.tailscaleIp || null)) return;
+  s.tailscaleIp = ip; saveSettings(); send('settings', publicSettings());
+  if (ip) { log(`Tailscale: the server's address for friends is ${friendAddress(s)}`, 'done'); schedulePublish('server address'); }
+}
+// Tailscale on this PC: installed? running? does it see the server (shared with this account) and is it online?
+let tsLocal = null;
+function localTailscale(host = null) {
+  const cli = process.platform === 'win32' ? path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Tailscale', 'tailscale.exe') : 'tailscale';
+  if (process.platform === 'win32' && !fs.existsSync(cli)) return Promise.resolve(tsLocal = { installed: false });
+  return new Promise(res => execFile(cli, ['status', '--json'], { windowsHide: true, timeout: 8000, maxBuffer: 8 << 20 }, (e, out) => {
+    if (e && e.code === 'ENOENT') return res(tsLocal = { installed: false });
+    let j = null; try { j = JSON.parse(out); } catch { }
+    if (!j) return res(tsLocal = { installed: true, state: 'Stopped' });
+    const r = { installed: true, state: j.BackendState, self: (j.Self?.TailscaleIPs || [])[0] || null };
+    if (host) {
+      const p = Object.values(j.Peer || {}).find(x => (x.TailscaleIPs || []).includes(host) || (x.DNSName || '').replace(/\.$/, '').toLowerCase() === host.toLowerCase());
+      r.peer = p ? { name: p.HostName, online: !!p.Online } : null;
+    }
+    res(tsLocal = r);
+  }));
+}
+// can this PC reach the friends' address? (the Steam query on the game's port) - and if not, why (Tailscale)
+async function checkFriendAddress(addr = friendAddress()) {
+  if (!addr) return { ok: false, reason: 'noaddr' };
+  const a = a2s.parseAddress(addr, gdef());
+  const ts = isTailscaleAddr(addr) ? await localTailscale(a.host) : null;
+  try { const i = await a2s.info(a.host, a.queryPort, 3500); return { ok: true, addr, players: i.players, ts }; } catch { }
+  const reason = !ts ? 'down' : !ts.installed ? 'ts-missing' : ts.state === 'NeedsLogin' ? 'ts-login' : ts.state !== 'Running' ? 'ts-stopped' : !ts.peer ? 'ts-notshared' : !ts.peer.online ? 'ts-offline' : 'down';
+  return { ok: false, addr, reason, ts };
+}
+const REACH_TEXT = {
+  noaddr: "the server's address is not known - ask the admin for it and write it in Settings",
+  down: 'the server does not answer - it may be stopped or still starting',
+  'ts-missing': 'the server is reached through Tailscale: install Tailscale (tailscale.com/download), sign in, then open the invite link the admin sends you',
+  'ts-login': 'Tailscale is installed but not signed in: open it and sign in',
+  'ts-stopped': 'Tailscale is not connected: open it and press Connect',
+  'ts-notshared': "Tailscale does not see the server: open the admin's Tailscale invite link (Share) and accept it, with the account you are signed in with",
+  'ts-offline': "Tailscale sees the server but it is offline right now",
+};
+// the admin's Docker server knows its own password knows its own password (SERVER_PASS of the valheim-server image)
 async function detectJoinPassword(s = srv()) {
   const tr = transport(s);
   if (!tr?.valheimImage) throw new Error('Doar pentru servere Docker (valheim-server) - scrie parola de mână.');
@@ -739,7 +800,7 @@ async function detectJoinPassword(s = srv()) {
 }
 async function joinArgs() {
   const s = srv();
-  if (s.directJoin === false) return { args: [], target: null };
+  if (!isValheim(s) || s.directJoin === false) return { args: [], target: null };
   const target = joinTarget(s);
   if (!target) return { args: [], target: null };
   if (!s.joinPassEnc && isAdmin() && transport()?.valheimImage) { try { await detectJoinPassword(s); } catch (e) { log(`server password: ${e.message}`, 'error'); } }
@@ -827,6 +888,17 @@ async function launchGame() {
     const code = status.joinCode || manifest.server.joinCode;
     clipboard.writeText(code);
     toast(`The server's address is not known, so the join code ${code} was copied: in the game Join game → Add server → Ctrl+V.`, 'info');
+  }
+  // Enshrouded cannot be told the server on its command line: the address goes to the clipboard, and a server this
+  // PC cannot reach (Tailscale off, not shared yet) is explained before the player looks for it in the game
+  else if (!isValheim() && (srv().role === 'admin' || srv().list)) {
+    const addr = friendAddress();
+    if (addr) clipboard.writeText(addr);
+    checkFriendAddress(addr).then(r => {
+      send('reach', { ...r, text: r.ok ? null : REACH_TEXT[r.reason] });
+      if (r.ok) toast(`${addr} was copied: in ${name} Play → Join → press T → Ctrl+V → Enter.`, 'ok');
+      else { log(`${name}: ${addr || 'no address'} - ${REACH_TEXT[r.reason]}`, 'error'); toast(`${addr ? `${addr} was copied, but ` : ''}${REACH_TEXT[r.reason]}.`, 'error'); }
+    });
   }
   // "launching" until the game process shows up (Steam can take a while), at most 2 minutes
   const until = Date.now() + 120e3;
@@ -1155,8 +1227,16 @@ function tick() {
 let status = { reachable: null, checkedAt: null };
 let polling = false;
 const publicAddress = () => (srv()?.role === 'player' ? manifest?.server?.address : status.publicIp) || null;
+// where the Steam query asks: the first of Settings → Addresses, else (Enshrouded) the friends' address, else the
+// SSH host itself
+function queryAddress(s = srv()) {
+  const first = (s?.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean);
+  if (first || isValheim(s)) return first || null;
+  const host = s?.conn && /^ssh/.test(s.conn.type) ? String(s.conn.host || '').replace(/^.*@/, '') : s?.conn?.type === 'local' ? '127.0.0.1' : null;
+  return friendAddress(s) || (host ? `${host}:${gdef(s).gamePort}` : null);
+}
 async function steamPlayers() {
-  const a = a2s.parseAddress(publicAddress() || (srv()?.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean), gdef());
+  const a = a2s.parseAddress(publicAddress() || queryAddress(), gdef());
   if (!a) return null;
   const i = await a2s.info(a.host, a.queryPort);
   return i.players;
@@ -1172,13 +1252,15 @@ async function pollStatus() {
       const tr = transport();
       let st = await tr.status().catch(e => ({ reachable: false, error: e.message, checkedAt: Date.now() }));
       const query = async () => {
-        try { const i = await (async () => { const a = a2s.parseAddress((s.addresses || '').split(/[;\n]/).map(x => x.split('=')[1]).find(Boolean), gdef()); return a ? a2s.info(a.host, a.queryPort) : null; })(); if (i) { st.players = i.players; st.gameUp = true; st.idle = i.players === 0; } else st.unknown = true; }
-        catch { st.unknown = true; }   // (crossplay servers do not answer the Steam query either)
+        try { const i = await (async () => { const a = a2s.parseAddress(queryAddress(s), gdef()); return a ? a2s.info(a.host, a.queryPort) : null; })(); if (i) { st.players = i.players; st.gameUp = true; st.idle = i.players === 0; if (!i.players) st.online = []; } else if (st.players == null) st.unknown = true; }
+        catch { if (st.players == null) st.unknown = true; }   // (crossplay servers do not answer the Steam query either)
       };
       // no process view (plain SSH, local, FTP): the Steam query says if it is up and who plays
       if (!st) { st = { reachable: true, checkedAt: Date.now(), container: 'running' }; await query(); }
       // another game's container: Docker says if it runs, the Steam query who plays
       else if (!tr.valheimImage && st.container === 'running') await query();
+      // (Enshrouded: the address friends type, shown on the Server page)
+      if (!isValheim(s)) { detectTailscaleIp(s); const fa = friendAddress(s); if (fa) { st.publicIp = fa; st.viaTailscale = isTailscaleAddr(fa); } }
       status = st;
     } else if (s.role === 'player') {
       const sv = manifest?.server || {};
@@ -1536,12 +1618,15 @@ function schedulePublish(reason) {
   clearTimeout(publishTimer);
   publishTimer = setTimeout(() => publishList(reason), 4000);
 }
+// Enshrouded's address in the list: a Tailscale one always (useless to anyone the admin has not shared the server
+// with), any other only with 'Put the IP in the list too'
+const listFriendAddress = s => { const a = friendAddress(s); return a && (s.publishAddress || isTailscaleAddr(a)) ? a : null; };
 function buildList() {
   const s = srv(), pk = getProfile().packages;
   return buildServerList({
     game: gdef().id, loader: pk[EML] ? { ver: pk[EML].ver } : null,
     mods: adminMods().mods, nexusLinks: s.nexusLinks,
-    server: { name: s.name, world: s.world, joinCode: status.codeBroken ? null : status.joinCode || null, joinCodeAt: status.joinCodeAt || null, address: s.publishAddress ? status.publicIp || null : null,
+    server: { name: s.name, world: s.world, joinCode: status.codeBroken ? null : status.joinCode || null, joinCodeAt: status.joinCodeAt || null, address: !isValheim(s) ? listFriendAddress(s) : s.publishAddress ? status.publicIp || null : null, ...(!isValheim(s) && isTailscaleAddr(listFriendAddress(s)) ? { tailscale: true } : {}),
       // opt-in: everyone with the invite link can read it (the list is the same link that gives them the IP)
       ...(s.publishPassword && dec(s.joinPassEnc) ? { password: dec(s.joinPassEnc) } : {}) },
     configs: (s.sharedConfigs || []).map(rel => { try { return sharedcfg.collect(rel, fs.readFileSync(cfgPath(rel), 'utf8')); } catch { return null; } }).filter(Boolean),
@@ -1906,7 +1991,7 @@ ipcMain.handle('action', async (_e, name, arg) => {
 ipcMain.handle('installUpdate', () => { quitting = true; app.relaunch(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE, args: process.argv.slice(1) } : undefined); app.quit(); });
 const SERVER_SETTABLE = { directJoin: 'directJoin', joinAddress: 'joinAddress', serverName: 'name', serverWorld: 'world', addresses: 'addresses', autoSync: 'autoSync', quietSeconds: 'quietSeconds', retryMinutes: 'retryMinutes',
   syncConfigs: 'syncConfigs', syncAllMods: 'syncAllMods', pullServerMods: 'pullServerMods', autoPublish: 'autoPublish', publishAddress: 'publishAddress', publishPassword: 'publishPassword', builtin: 'builtin', modpackTeam: 'modpackTeam', modpackName: 'modpackName' };
-const GLOBAL_SETTABLE = ['startWithWindows', 'notifications', 'gameDir', 'lang', 'bepConsoleMode'];
+const GLOBAL_SETTABLE = ['startWithWindows', 'notifications', 'gameDir', 'lang', 'bepConsoleMode', 'squire'];
 async function action(name, arg) {
   const s = srv();
   switch (name) {
@@ -2061,7 +2146,7 @@ async function action(name, arg) {
         s[SERVER_SETTABLE[arg.key]] = arg.value; saveSettings();
         if (arg.key === 'autoSync') { if (arg.value && watch.dirty) changedAt = Date.now() - s.quietSeconds * 1000; setWatch(arg.value ? 'idle' : 'off', arg.value ? 'pornit' : 'auto-sync oprit'); }
         if (arg.key === 'publishPassword' && arg.value && !s.joinPassEnc && transport()?.docker) await detectJoinPassword(s).catch(e => log(`server password: ${e.message}`, 'error'));
-        if (arg.key === 'publishAddress' || arg.key === 'publishPassword' || arg.key === 'serverName' || arg.key === 'serverWorld') schedulePublish('settings');
+        if (arg.key === 'publishAddress' || arg.key === 'publishPassword' || (arg.key === 'joinAddress' && !isValheim()) || arg.key === 'serverName' || arg.key === 'serverWorld') schedulePublish('settings');
       } else return { ok: false };
       send('settings', publicSettings()); return { ok: true };
     }
@@ -2105,6 +2190,7 @@ async function action(name, arg) {
       if (s) for (const p of Object.values(getProfile().packages)) if (p.source === 'nexus') out[p.modId] = p.ver;
       return { ok: true, installed: out, pending: nexusPending };
     }
+    case 'checkReach': { const r = await checkFriendAddress(); send('settings', publicSettings()); return { ...r, text: r.ok ? null : REACH_TEXT[r.reason] }; }
     case 'findGame': game = await findGame(); send('player', playerInfo()); return { ok: !!game.game, game };
     case 'restoreLoader': {
       if (!game.game) return { ok: false, error: 'The game folder is not found.' };

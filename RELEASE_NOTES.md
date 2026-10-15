@@ -1,4 +1,13 @@
-﻿## Bifrost 2.0.0
+﻿## Bifrost 2.1.0
+
+- **Enshrouded without a port forward: Tailscale.** If the server's machine has Tailscale, Bifrost finds its address by itself and puts it in the server's list. Friends install Tailscale, accept the admin's share invite (Tailscale console → Machines → the server → Share) and press PLAY.
+- Enshrouded **PLAY copies the server's address**: in the game Join → press T → Ctrl+V. If this PC cannot reach the server, Bifrost says why: Tailscale missing, not connected, server not shared with you yet, server offline.
+- Settings → **Address for friends** (empty = the server's Tailscale address) and **Tailscale** → Check.
+- The invite page shows the Tailscale steps for servers reached through it.
+- **Enshrouded players online**: the Server page counted nobody (the Steam query was never asked without Settings → Addresses). Now the query goes to the friends' address or the SSH host, and the names come from the server's log ("Seen since start", online ones first).
+- **Sir Bodo**, a squire with a bucket helmet too big for him, now lives at the bottom of the sidebar. Click him. He also has opinions about syncs, PLAY and errors. Settings → Sir Bodo hides him.
+
+## Bifrost 2.0.0
 
 - **Enshrouded support.** When you create a server (or a personal profile) you pick the game: Valheim or Enshrouded. Everything else works the same way: mods in Discover, sync to the server, restart when nobody plays, the list + invite for friends, PLAY.
 - Enshrouded mods come from **Nexus Mods** and are loaded by **EML** (Enshrouded Mod Loader, github.com/Brabb3l/kfc-parser). Bifrost downloads EML itself and puts its dbghelp.dll next to enshrouded.exe on your PC and next to enshrouded_server.exe on the server; the game's mods folder points at the chosen server's profile, so every server keeps its own mods.
