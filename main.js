@@ -1049,20 +1049,21 @@ function signature() {
   return parts.join('\n');
 }
 
-async function confirmMass(list) {
+async function confirmMass(list, empty) {
   showWindow();
   const r = await dialog.showMessageBox(win, {
     type: 'warning', buttons: ['Cancel', 'Remove them from the server'], defaultId: 0, cancelId: 0, title: 'Bifrost',
-    message: `${list.length} mods would be removed from the server`, detail: `${list.join(', ')}\n\nAn empty or wrong profile looks exactly like this. Continue?`,
+    message: empty ? `The profile has no mods - remove all ${list.length} from the server too?` : `${list.length} mods would be removed from the server`,
+    detail: `${list.join(', ')}\n\n${empty ? 'Cancel keeps them on the server; automatic syncs wait until the profile changes.' : 'An empty or wrong profile looks exactly like this. Continue?'}`,
   });
   return r.response === 1;
 }
 
 // what the mod sync does differently per game: Enshrouded mods carry no ServerSync-like signs, so a new one goes to the
-// server and every player unless the admin marks it client-only; an empty mods folder is a valid server there
+// server and every player unless the admin marks it client-only
 function syncGameOpts() {
   if (isValheim()) return {};
-  return { guessSide: () => ['server', `${gdef().name}: on the server and for every player - mark it client if it only changes this PC`], allowEmpty: true };
+  return { guessSide: () => ['server', `${gdef().name}: on the server and for every player - mark it client if it only changes this PC`] };
 }
 // EML games: the loader (dbghelp.dll + its files) goes next to the dedicated server's exe; true when something was sent
 let loaderEnvWarned = false;
@@ -1152,9 +1153,12 @@ async function syncNow(reason) {
     await maybeRestart({ manual, what });
   } catch (e) {
     setJob(null);
-    if (e.code === 'MASS_REMOVAL') {
-      watch.lastResult = { kind: 'warn', text: `Stopped: ${e.message}` }; syncedSig = sig;
-      notify('Bifrost: sync stopped', e.message, 'warn'); setWatch('attention', 'needs attention');
+    if (e.code === 'MASS_REMOVAL' || e.code === 'EMPTY_PROFILE') {
+      // no retry: the same profile gives the same answer; the next profile change (or Sync now) tries again
+      watch.lastResult = { kind: 'warn', text: `Stopped: ${e.message}` }; syncedSig = sig; failStreak = 0;
+      log(`■ Sync stopped: ${e.message}`, 'error');
+      if (!manual) notify('Bifrost: sync stopped', e.message, 'warn');
+      setWatch('attention', 'needs attention');
     } else {
       failStreak++;
       watch.lastResult = { kind: 'error', text: `Error: ${e.message}` };
