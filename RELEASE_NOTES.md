@@ -1,4 +1,9 @@
-﻿## Bifrost 2.2.1
+﻿## Bifrost 2.2.2
+
+- **Enshrouded 1.0:** EML 0.1.2 cannot read 1.0's data files (KFC4) and stopped the game ("Fatal error ... Failed to create AppState") and the dedicated server at every start. Bifrost now checks the game's data file first: when the installed EML cannot read it, it looks for a newer EML on GitHub (at most once an hour), and if there is none yet the game starts **without mods** (with a message) and the server sync takes EML off the server instead of putting it there. Mods come back by themselves once EML supports 1.0.
+- Settings → Mod loader → Put back no longer copies an EML backup of the game's data file from an older game version over the new one.
+
+## Bifrost 2.2.1
 
 - The first mod sync to a server whose mods folder did not exist yet failed ("can't cd to .../mods"): clearing a folder that is not there now counts as done, and the copy creates it.
 - Sir Bodo no longer says "delivered" when a sync failed.

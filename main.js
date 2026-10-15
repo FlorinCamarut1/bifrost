@@ -31,7 +31,7 @@ app.commandLine.appendSwitch('disk-cache-size', String(100 * 1024 * 1024));
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
-const { Profile, BEPINEX, EML, cmpVer, parseDep } = require('./lib/profile');
+const { Profile, BEPINEX, EML, EML_REPO, emlSupports, cmpVer, parseDep } = require('./lib/profile');
 const { Nexus } = require('./lib/nexus');
 const { build: buildServerList } = require('./lib/manifest');
 const listhost = require('./lib/listhost');
@@ -562,6 +562,14 @@ async function installNexus(entry, nxm) {
     pr.game.loader === 'eml' ? Profile.emlMap(entry.key) : Profile.nexusMap(entry.key), dllName);
   log(`  installed ${entry.title} (Nexus ${entry.modId})`, 'out');
 }
+// the installed EML cannot read the game's data file (a game update): ask GitHub for a newer release, at most once an
+// hour (the GitHub API allows 60 calls an hour without a token); true when one was installed
+let emlLatestTried = 0;
+async function tryNewerEml() {
+  if (Date.now() - emlLatestTried < 3600e3) return false;
+  emlLatestTried = Date.now();
+  try { return (await installLoader('latest')).changed; } catch (e) { log(`EML: ${e.message}`, 'error'); return false; }
+}
 // EML (Enshrouded Mod Loader) from its GitHub releases: ver = a release tag, or 'latest'
 async function installLoader(ver = 'latest') {
   const pr = getProfile();
@@ -878,7 +886,15 @@ async function launchGame() {
   try {
     if (isValheim()) try { getProfile().setConsole(G.bepConsoleMode || 'nowarn'); } catch (e) { log(`BepInEx.cfg: ${e.message}`, 'error'); }
     try { guardConfigs(); } catch (e) { log(`config guard: ${e.message}`, 'error'); }
-    getProfile().prepareGame(game.game);
+    if (gdef().loader === 'eml' && !getProfile().emlCompat(game.game).ok) {
+      await tryNewerEml();
+    }
+    const prep = getProfile().prepareGame(game.game);
+    if (prep?.emlOff) {
+      const c = prep.emlOff;
+      log(`EML ${c.ver} cannot read this ${name} version (data file ${c.magic}) - the game starts WITHOUT mods until a newer EML is released (github.com/${EML_REPO})`, 'error');
+      toast(`EML ${c.ver} does not support this ${name} version yet - starting without mods. Bifrost picks up a new EML by itself.`, 'error');
+    }
     var join = await joinArgs();
     var startedAt = Date.now();
     await getProfile().launch(game, join.args);
@@ -1055,8 +1071,26 @@ async function syncLoader(tr) {
   await fixDockerServerDir();
   tr = transport();
   if (!tr.serverDir) { log('  EML is not put on the server: the connection has no server folder (where enshrouded_server.exe is)', 'error'); return false; }
-  const pr = getProfile(), files = pr.loaderFiles();
+  let pr = getProfile(), files = pr.loaderFiles();
   if (!files.length) return false;
+  // a server version this EML cannot read: EML would stop the server at every start -> a newer EML, else none
+  const sMagic = String(await tr.run(`head -c 4 ${shq(`${tr.serverDir}/enshrouded_server.kfc`)} 2>/dev/null || true`, { timeout: 20000 }).catch(() => '')).trim() || null;
+  if (!emlSupports(pr.packages[EML]?.ver, sMagic)) {
+    if (await tryNewerEml()) { pr = getProfile(); files = pr.loaderFiles(); }
+  }
+  if (!emlSupports(pr.packages[EML]?.ver, sMagic)) {
+    let off = false;
+    for (const f of files) {
+      let remote = null; try { remote = await tr.read(tr.serverDir, f.rel); } catch { }
+      if (remote && remote.equals(fs.readFileSync(f.abs))) { await tr.run(`mv -f ${shq(`${tr.serverDir}/${f.rel}`)} ${shq(`${tr.serverDir}/${f.rel}.eml-off`)}`); off = true; }
+    }
+    if (!loaderEnvWarned) {
+      loaderEnvWarned = true;
+      log(`  EML ${pr.packages[EML]?.ver} cannot read this server version (${sMagic}) - the server runs WITHOUT mods until a newer EML is released${off ? ' (EML taken off the server)' : ''}`, 'error');
+      notify('Bifrost: server mods are off', `EML ${pr.packages[EML]?.ver} does not support this ${gdef().name} version yet.`, 'warn');
+    }
+    return off;
+  }
   // Wine / Proton only loads the proxy when told to (WINEDLLOVERRIDES dbghelp=n). Some images set it in their start
   // script (indifferentbroccoli), others take it from the container's environment (mornedhels): the running server
   // process's own environment is what counts. It is read on the host (docker top gives the host pids; root inside the
