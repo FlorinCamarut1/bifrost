@@ -1,4 +1,9 @@
-﻿## Bifrost 2.1.1
+﻿## Bifrost 2.1.2
+
+- Server menu: the game tag (ENSHROUDED) ran over the role. Each server now shows its name, with "role · game" under it; long names end in "...".
+- Discover for Enshrouded said "The Thunderstore catalog for Valheim" above the Nexus list after the catalog refreshed.
+
+## Bifrost 2.1.1
 
 - Discover (Nexus) for Enshrouded stopped at the first 30 mods: scrolling down did not load the rest (it waited for the Thunderstore catalog, which Enshrouded never loads). A tall window that still shows the end of the list after a page now loads the next one too.
 

@@ -361,7 +361,10 @@ a[data-open] { color: var(--blue); cursor: pointer; }
 .srv-item { width: 100%; display: flex; align-items: center; gap: 9px; padding: 8px; border: 0; background: none; border-radius: 8px; cursor: pointer; text-align: left; font-size: 13px; }
 .srv-item:hover { background: #ffffff0c; }
 .srv-item.on { color: var(--gold2); }
-.srv-item small { margin-left: auto; color: var(--muted); font-size: 11px; }
+/* name over "role · game" (a game tag beside the name ran over the role, 2.1.1) */
+.srv-item-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.srv-item-text b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-item small { color: var(--muted); font-size: 11px; }
 .srv-menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
 body.no-server [data-need="server"] { display: none !important; }
 body:not(.no-server) [data-need="none"] { display: none !important; }

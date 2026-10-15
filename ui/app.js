@@ -538,6 +538,8 @@ function buildCats() {
     cats.map(([c, n]) => `<button class="chip ${S.bcat === c ? 'active' : ''}" data-cat="${esc(c)}">${esc(c)} <b>${n}</b></button>`).join('');
 }
 function renderBrowseSub() {
+  // (the Nexus list writes its own line; the catalog's refresh used to put Thunderstore's back over it)
+  if (S.src === 'nx') { $('#br-sub').textContent = L(`Nexus Mods pentru ${gameName()} · ${S.nx.total.toLocaleString(LOC())} moduri`, `Nexus Mods for ${gameName()} · ${S.nx.total.toLocaleString(LOC())} mods`); return; }
   const n = S.catalog ? S.catalog.filter(p => !isPack(p) && !p.deprecated).length : 0;
   $('#br-sub').textContent = S.catalog
     ? L(`Catalogul Thunderstore pentru Valheim · ${n.toLocaleString(LOC())} moduri · actualizat ${ago(S.catalogFetched)}${S.catalogBusy ? ' · se reîmprospătează...' : ''}`, `The Thunderstore catalog for Valheim · ${n.toLocaleString(LOC())} mods · updated ${ago(S.catalogFetched)}${S.catalogBusy ? ' · refreshing...' : ''}`)
@@ -1248,7 +1250,7 @@ function renderServers() {
   $('#srv-cur-badge').textContent = cur ? (cur.name || '?')[0].toUpperCase() : '+';
   $('#srv-cur-name').textContent = cur ? cur.name : 'Niciun server';
   $('#srv-cur-role').textContent = cur ? (cur.role === 'admin' ? 'admin' : cur.list ? 'jucător' : 'profil personal') : 'adaugă unul';
-  $('#srv-menu').innerHTML = list.map(x => `<button class="srv-item ${cur && x.id === cur.id ? 'on' : ''}" data-switch="${esc(x.id)}"><span class="srv-badge">${esc((x.name || '?')[0].toUpperCase())}</span>${esc(x.name)}${x.game && x.game !== 'valheim' ? `<span class="game-tag">${esc(x.game)}</span>` : ''}<small>${roleName(x.role)}</small></button>`).join('')
+  $('#srv-menu').innerHTML = list.map(x => `<button class="srv-item ${cur && x.id === cur.id ? 'on' : ''}" data-switch="${esc(x.id)}"><span class="srv-badge">${esc((x.name || '?')[0].toUpperCase())}</span><span class="srv-item-text"><b>${esc(x.name)}</b><small>${roleName(x.role)} · ${esc((S.settings.games || []).find(g => g.id === (x.game || 'valheim'))?.name || x.game || 'Valheim')}</small></span></button>`).join('')
     + `${list.length ? '<hr>' : ''}<button class="srv-item" data-menu="join">＋ Am o invitație</button><button class="srv-item" data-menu="create">＋ Creează server</button><button class="srv-item" data-menu="local">＋ Profil personal</button>`;
   if (cur) {
     const c = cur.conn;
