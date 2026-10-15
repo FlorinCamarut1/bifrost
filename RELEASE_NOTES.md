@@ -1,4 +1,9 @@
-﻿## Bifrost 2.2.0
+﻿## Bifrost 2.2.1
+
+- The first mod sync to a server whose mods folder did not exist yet failed ("can't cd to .../mods"): clearing a folder that is not there now counts as done, and the copy creates it.
+- Sir Bodo no longer says "delivered" when a sync failed.
+
+## Bifrost 2.2.0
 
 - **Enshrouded server settings** (Server → Server settings): name, players, chat, the difficulty preset and every game setting (player, survival, world, progression, enemies, day and night), and user groups with their own passwords and rights (e.g. an Admin group that can kick/ban). Changing a game setting switches the preset to Custom, the only one where they count. A JSON mode edits the file as text. A copy of enshrouded_server.json is kept next to it at every save; applying restarts the server and then checks the game kept the values.
 - Docker images that write the name, password or player count from their environment at every start (indifferentbroccoli, mornedhels) get the same values in the compose env file, so a restart does not undo them.

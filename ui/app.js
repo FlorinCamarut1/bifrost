@@ -1594,7 +1594,7 @@ window.vp.on((ch, d) => {
   else if (ch === 'job') {
     // Sir Bodo: off with the cart when a job starts, "delivered" when it ends without an error toast
     if (d && !S.job) window.squire.say('sync');
-    else if (!d && S.job) setTimeout(() => { if (Date.now() - lastErrorAt > 3000) window.squire.say('done', true); }, 800);
+    else if (!d && S.job) setTimeout(() => { if (Date.now() - lastErrorAt < 3000) return; window.squire.say(S.watch?.state === 'error' ? 'error' : 'done', true); }, 800);   // (a failed sync shows on the card, not as a toast)
     S.job = d; renderWatch(); renderMods(); renderPlayer();
   }
   else if (ch === 'queue') { S.queue = d; renderWatch(); }
