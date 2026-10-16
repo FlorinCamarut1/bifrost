@@ -1087,7 +1087,7 @@ async function openEnsSettings() {
 function ensRow(p, type, label, hint, x = {}) {
   const v = ensGet(ENS.edit, p), changed = JSON.stringify(v) !== JSON.stringify(ensGet(ENS.json, p));
   let ctl;
-  if (type === 'bool') ctl = `<span class="switch"><input type="checkbox" data-ens="${p}" data-t="bool" ${v ? 'checked' : ''}><span></span></span>`;
+  if (type === 'bool') ctl = `<label class="switch"><input type="checkbox" data-ens="${p}" data-t="bool" ${v ? 'checked' : ''}><span></span></label>`;
   else if (type === 'enum') ctl = `<select class="select" data-ens="${p}" data-t="enum">${(x.options || []).concat(x.options?.includes(v) || v === undefined ? [] : [v]).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   else if (type === 'minutes') ctl = `<input class="txt num-in" data-ens="${p}" data-t="minutes" inputmode="decimal" value="${v === undefined ? '' : +(v / ENS.schema.MIN).toFixed(2)}">`;
   else if (type === 'factor' || type === 'number') ctl = `<input class="txt num-in" data-ens="${p}" data-t="${type}" inputmode="decimal" value="${v === undefined ? '' : esc(String(v))}">`;
