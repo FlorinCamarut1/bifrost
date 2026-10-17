@@ -236,8 +236,8 @@ function createWindow(show) {
   const shotMode = process.argv.some(x => x.startsWith('--shot='));
   win = new BrowserWindow({
     width: 1220, height: 800, minWidth: 940, minHeight: 620, show: false, ...(shotMode ? { x: -6000, y: 0 } : {}),
-    title: 'Bifrost', icon: ICON, backgroundColor: '#0e1115',
-    titleBarStyle: 'hidden', titleBarOverlay: { color: '#0e1115', symbolColor: '#d8d2c4', height: 40 },
+    title: 'Bifrost', icon: ICON, backgroundColor: '#090b10',
+    titleBarStyle: 'hidden', titleBarOverlay: { color: '#090b10', symbolColor: '#a6adbd', height: 40 },
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, backgroundThrottling: !shotMode },
   });
   win.removeMenu();
