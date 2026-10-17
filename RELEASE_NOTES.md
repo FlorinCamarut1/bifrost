@@ -1,4 +1,11 @@
-﻿## Bifrost 2.2.2
+﻿## Bifrost 2.3.0
+
+- **New look.** The window is a dark desktop shell: the title bar and sidebar are the frame, and each page sits in a rounded panel. Text uses one modern font, and colours are calmer, with a periwinkle accent. A soft aurora (teal to violet) marks the Bifrost name, the open page, the join code, PLAY and the progress bars.
+- Mod lists are one panel with a row per mod. Mod details open in a floating sheet, dialogs blur what is behind them, and notifications slide in and fade out.
+- On/off switches can be reached with the keyboard (Tab, Space), and every control shows a focus ring. With Windows animations turned off, Bifrost turns off its own animations too.
+- New screenshots in the README.
+
+## Bifrost 2.2.2
 
 - **Enshrouded 1.0:** EML 0.1.2 cannot read 1.0's data files (KFC4) and stopped the game ("Fatal error ... Failed to create AppState") and the dedicated server at every start. Bifrost now checks the game's data file first: when the installed EML cannot read it, it looks for a newer EML on GitHub (at most once an hour), and if there is none yet the game starts **without mods** (with a message) and the server sync takes EML off the server instead of putting it there. Mods come back by themselves once EML supports 1.0.
 - Settings → Mod loader → Put back no longer copies an EML backup of the game's data file from an older game version over the new one.
