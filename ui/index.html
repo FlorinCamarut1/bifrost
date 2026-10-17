@@ -2,6 +2,7 @@
 <html lang="ro">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="dark">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' modicon: data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
 <title>Bifrost</title>
 <link rel="stylesheet" href="style.css">
@@ -25,6 +26,7 @@
     <button class="nav" data-page="pmods" data-need="server" data-role="player"><svg viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg><span>Moduri</span></button>
     <button class="nav" data-page="browse" data-need="server"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z"/></svg><span>Descoperă</span></button>
     <button class="vh-only nav" data-page="modpack" data-role="admin" data-need="server"><svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/></svg><span>Modpack</span><b class="count warn" id="nav-modpack" hidden></b></button>
+    <div class="nav-sep" aria-hidden="true"></div>
     <button class="nav" data-page="log"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>Jurnal</span></button>
     <button class="nav" data-page="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg><span>Setări</span></button>
     <div class="sidebar-foot">
@@ -350,7 +352,7 @@
 </div>
 
 <div class="drawer-bg" id="drawer-bg" hidden></div>
-<aside class="drawer" id="drawer" hidden><button class="icon-btn drawer-x" id="drawer-x" title="Închide">✕</button><div id="drawer-body"></div></aside>
+<aside class="drawer" id="drawer" hidden><button class="icon-btn drawer-x" id="drawer-x" title="Închide"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div id="drawer-body"></div></aside>
 <div class="modal" id="wiz" hidden><div class="modal-box wide">
   <h3 id="wiz-title">Creează server</h3>
   <div class="wiz-body">
