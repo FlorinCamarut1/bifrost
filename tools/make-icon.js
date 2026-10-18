@@ -1,20 +1,18 @@
-// Renders the app icon (Algiz rune on night blue) to ui/app.png + ui/app.ico.  Run: npx electron tools/make-icon.js
+// Renders the app icon (red Algiz rune on a chamfered black tile, like the UI) to ui/app.png + ui/app.ico.  Run: npx electron tools/make-icon.js
 const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
 <defs>
-  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22305a"/><stop offset="1" stop-color="#0b1122"/></linearGradient>
-  <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="56" x2="0" y2="204"><stop offset="0" stop-color="#fdedc0"/><stop offset="1" stop-color="#d6a84f"/></linearGradient>
-  <radialGradient id="glow" cx="0.5" cy="0.42" r="0.5"><stop offset="0" stop-color="#e6c477" stop-opacity=".28"/><stop offset="1" stop-color="#e6c477" stop-opacity="0"/></radialGradient>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#26262a"/><stop offset="1" stop-color="#0a0a0b"/></linearGradient>
+  <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff4136"/><stop offset="1" stop-color="#c8121a"/></linearGradient>
+  <radialGradient id="glow" cx="0.5" cy="0.55" r="0.5"><stop offset="0" stop-color="#e2231a" stop-opacity=".45"/><stop offset="1" stop-color="#e2231a" stop-opacity="0"/></radialGradient>
 </defs>
-<rect x="6" y="6" width="244" height="244" rx="56" fill="url(#bg)"/>
-<rect x="6" y="6" width="244" height="244" rx="56" fill="url(#glow)"/>
-<rect x="8" y="8" width="240" height="240" rx="54" fill="none" stroke="#e6c477" stroke-opacity=".45" stroke-width="4"/>
-<g stroke="url(#g)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" fill="none">
-  <path d="M128 60 V200"/><path d="M128 132 L78 66"/><path d="M128 132 L178 66"/>
-</g>
+<path d="M50 8 H248 V206 L206 248 H8 V50 Z" fill="url(#bg)"/>
+<path d="M50 8 H248 V206 L206 248 H8 V50 Z" fill="url(#glow)"/>
+<path d="M50 8 H248 V206 L206 248 H8 V50 Z" fill="none" stroke="#e2231a" stroke-opacity=".55" stroke-width="4"/>
+<path d="M128 64 V200 M80 72 L128 136 L176 72" fill="none" stroke="url(#g)" stroke-width="26" stroke-linecap="square" stroke-linejoin="miter"/>
 </svg>`;
 
 app.disableHardwareAcceleration();
