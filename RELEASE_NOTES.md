@@ -1,4 +1,8 @@
-﻿## Bifrost 2.4.1
+﻿## Bifrost 2.4.2
+
+- **The taskbar shows the new logo too.** After 2.4.1 the taskbar button and the Start menu / desktop shortcuts kept the old icon: Windows took it from the installer's copy, which an in-app update never replaced. Bifrost now keeps its current icon next to its settings and points the shortcuts (and a Bifrost pinned to the taskbar) at it, so the icon follows every update. If Windows still shows the old one for a moment, it refreshes after the next sign-in.
+
+## Bifrost 2.4.1
 
 - **New logo** to match the 2.4.0 look: the Algiz rune is now red, with a soft glow, on a black tile with two cut corners. The update changes it inside the app; the desktop shortcut and taskbar icon change with a new install (Bifrost-Setup or the portable zip).
 
