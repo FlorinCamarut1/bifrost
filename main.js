@@ -81,7 +81,7 @@ const slug = s => String(s || 'server').toLowerCase().normalize('NFD').replace(/
 const GLOBAL_DEFAULTS = {
   // gameDir: Valheim's folder (from before other games); gameDirs: { <game id>: folder } for the others
   lang: null, notifications: true, startWithWindows: null, gameDir: null, gameDirs: {}, shortcutsV2: false, bepConsoleMode: 'nowarn', squire: true,
-  nexusKeyEnc: null, nexusUser: null, githubTokenEnc: null, githubUser: null, activeServer: null, servers: [], shortcutTarget: null,
+  nexusKeyEnc: null, nexusUser: null, githubTokenEnc: null, githubUser: null, activeServer: null, servers: [], shortcutTarget: null, shortcutIcon: null,
 };
 const SERVER_DEFAULTS = {
   id: '', name: 'Server', role: 'player', list: null, profileDir: null, createdAt: 0, game: 'valheim',   // lib/games.js
@@ -241,6 +241,9 @@ function createWindow(show) {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, backgroundThrottling: !shotMode },
   });
   win.removeMenu();
+  // the taskbar button's icon follows a code update too (see ownIcon); Windows reads it only with a relaunch command
+  if (process.platform === 'win32') win.setAppDetails({ appId: APP_ID, appIconPath: ownIcon(), appIconIndex: 0, relaunchDisplayName: 'Bifrost',
+    relaunchCommand: app.isPackaged ? `"${process.execPath}"` : `"${process.execPath}" "${__dirname}"` });
   winLoaded = false;
   win.webContents.on('did-start-loading', () => { winLoaded = false; });
   win.webContents.on('did-finish-load', () => pageReady());
@@ -299,9 +302,23 @@ const devShortcut = extraArgs => ({
   icon: path.join(__dirname, 'ui', 'app.ico'), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Valheim',
 });
 const startMenu = () => path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+// Windows takes the taskbar and shortcut icon from a real .ico file. The installer's resources\app.ico stays the one of the
+// installed build, so a build that runs a code update copies its own icon to %APPDATA%\Bifrost\app.ico and points there
+let ownIconPath = null;
+function ownIcon() {
+  if (ownIconPath) return ownIconPath;
+  const src = path.join(__dirname, 'ui', 'app.ico');
+  if (!app.isPackaged) return (ownIconPath = src);
+  try {
+    const b = fs.readFileSync(src), dst = path.join(DATA, 'app.ico');
+    if (!fs.existsSync(dst) || !b.equals(fs.readFileSync(dst))) fs.writeFileSync(dst, b);
+    ownIconPath = dst;
+  } catch (e) { log(`app.ico: ${e.message}`); ownIconPath = path.join(process.resourcesPath, 'app.ico'); }
+  return ownIconPath;
+}
 // the shortcut for whichever Bifrost runs: from source (electron.exe + folder) or a build (Bifrost.exe, portable or installed)
 const ownShortcut = extraArgs => app.isPackaged
-  ? { target: process.execPath, args: extraArgs || '', cwd: path.dirname(process.execPath), icon: path.join(process.resourcesPath, 'app.ico'), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Valheim' }
+  ? { target: process.execPath, args: extraArgs || '', cwd: path.dirname(process.execPath), icon: ownIcon(), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Valheim' }
   : devShortcut(extraArgs);
 // Linux: one bifrost.desktop (same name as the .deb's, so it shadows it instead of showing twice) for the menu and the
 // bifrost:// + nxm:// links, and a copy in ~/.config/autostart for "start at login"
@@ -340,11 +357,23 @@ function ensureShortcuts() {
     return;
   }
   const target = app.isPackaged ? process.execPath : `${process.execPath}|${__dirname}`;
-  if (G.shortcutTarget === target) return;
+  // (a new icon in a code update rewrites them too: the taskbar showed the old one after 2.4.1)
+  let icon = null; try { icon = crypto.createHash('sha1').update(fs.readFileSync(ownIcon())).digest('hex'); } catch { }
+  if (G.shortcutTarget === target && G.shortcutIcon === icon) return;
   for (const l of [path.join(startMenu(), 'Bifrost.lnk'), path.join(app.getPath('desktop'), 'Bifrost.lnk')]) {
     try { shell.writeShortcutLink(l, fs.existsSync(l) ? 'replace' : 'create', ownShortcut('')); } catch (e) { log(`shortcut ${l}: ${e.message}`); }
   }
-  G.shortcutTarget = target; G.shortcutsV2 = true; saveSettings();
+  // Bifrost pinned to the taskbar: Windows keeps its own copy of the shortcut, with the icon it had when pinned
+  if (app.isPackaged) {
+    const pinned = path.join(app.getPath('appData'), 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar');
+    let links = []; try { links = fs.readdirSync(pinned).filter(n => /\.lnk$/i.test(n)).map(n => path.join(pinned, n)); } catch { }
+    for (const l of links) {
+      try { if (path.resolve(shell.readShortcutLink(l).target) === path.resolve(process.execPath)) shell.writeShortcutLink(l, 'update', { icon: ownIcon(), iconIndex: 0 }); } catch { }
+    }
+    // ...and caches icons: ask Explorer to read them again
+    if (G.shortcutIcon !== icon) execFile('ie4uinit.exe', ['-show'], { windowsHide: true }, () => { });
+  }
+  G.shortcutTarget = target; G.shortcutIcon = icon; G.shortcutsV2 = true; saveSettings();
 }
 function registerProtocols() {
   if (LINUX) {
