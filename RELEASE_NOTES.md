@@ -1,4 +1,13 @@
-﻿## Bifrost 2.3.0
+﻿## Bifrost 2.4.0
+
+- **A new layout, in the style of AMD Software: Adrenalin.** The sidebar is gone. Pages are now tabs along the top (Start, Play, Server, Mods), and the open tab is underlined in red. The server selector sits on the right of the header, and Log and Settings are the two icons next to it.
+- Inside Mods, a second row of tabs switches between Library (My mods for players), Discover and Modpack.
+- Play and Server open with a large banner: the join code and players online in big numbers, and a large red PLAY button.
+- Discover shows mods as cards with their artwork. Each setting is a row of its own with a red switch. Mod details open in a full-height panel on the right.
+- A status bar along the bottom shows Sir Bodo, Auto-sync, the join code, players online and app updates.
+- In English, the update notice said "Bifrost x.y.z e disponibil.": it now says "is available."
+
+## Bifrost 2.3.0
 
 - **New look.** The window is a dark desktop shell: the title bar and sidebar are the frame, and each page sits in a rounded panel. Text uses one modern font, and colours are calmer, with a periwinkle accent. A soft aurora (teal to violet) marks the Bifrost name, the open page, the join code, PLAY and the progress bars.
 - Mod lists are one panel with a row per mod. Mod details open in a floating sheet, dialogs blur what is behind them, and notifications slide in and fade out.
