@@ -566,7 +566,7 @@ function renderBrowse(reset) {
   const shown = list.slice(0, S.blimit);
   $('#br-grid').innerHTML = shown.map(p => `
     <div class="pk" data-pk="${esc(p.full)}">
-      ${p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
+      ${p.icon ? `<img class="pk-bg" src="${esc(p.icon)}" alt="" aria-hidden="true" loading="lazy"><img src="${esc(p.icon)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
       <div><div class="pk-name">${esc(pkTitle(p))}</div><div class="pk-owner">de ${esc(p.owner)}</div><div class="pk-desc">${esc(p.desc)}</div></div>
       <div class="pk-foot"><span class="pk-stat" title="descărcări">${ICON_DL}${fmtNum(p.dl)}</span><span class="pk-stat" title="aprecieri">${ICON_STAR}${fmtNum(p.rating)}</span>${sideTags(p)}${pkButton(p)}</div>
     </div>`).join('');
@@ -650,7 +650,7 @@ function renderNexus() {
   $('#br-sub').textContent = L(`Nexus Mods pentru ${gameName()} · ${nx.total.toLocaleString(LOC())} moduri`, `Nexus Mods for ${gameName()} · ${nx.total.toLocaleString(LOC())} mods`);
   $('#br-grid').innerHTML = nx.list.map(m => `
     <div class="pk" data-nxpk="${m.modId}">
-      ${m.thumbnailUrl ? `<img src="${esc(m.thumbnailUrl)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
+      ${m.thumbnailUrl ? `<img class="pk-bg wide" src="${esc(m.thumbnailUrl)}" alt="" aria-hidden="true" loading="lazy"><img src="${esc(m.thumbnailUrl)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
       <div><div class="pk-name">${esc(m.name)}</div><div class="pk-owner">de ${esc(m.author || m.uploader?.name || '?')} · v${esc(m.version || '?')}</div><div class="pk-desc">${esc(m.summary)}</div></div>
       <div class="pk-foot"><span class="pk-stat" title="descărcări">${ICON_DL}${fmtNum(m.downloads)}</span><span class="pk-stat" title="endorsements">${ICON_STAR}${fmtNum(m.endorsements)}</span>${m.modCategory ? `<span class="nx-cat">${esc(m.modCategory.name)}</span>` : ''}${Date.parse(m.updatedAt) < NX_OUTDATED && S.settings.game?.outdated !== false ? '<span class="side-tag dep" title="Not updated since Ashlands (May 2024) - it may not work">outdated</span>' : ''}${nxButton(m)}</div>
     </div>`).join('');
@@ -1550,7 +1550,7 @@ function renderAppUpdate() {
   $('#btn-upd-dl').hidden = !u?.installer;
   if (!u || u.upToDate || u.error) { el.hidden = true; return; }
   el.hidden = false;
-  el.innerHTML = u.installer ? `<b>Bifrost ${esc(u.version)}</b> e disponibil.<button class="btn small primary" id="btn-app-dl">Descarcă</button>`
+  el.innerHTML = u.installer ? `<b>Bifrost ${esc(u.version)}</b> ${L('e disponibil.', 'is available.')}<button class="btn small primary" id="btn-app-dl">Descarcă</button>`
     : u.ready ? `<b>Bifrost ${esc(u.version)}</b> ${L('e gata.', 'is ready.')}<button class="btn small primary" id="btn-app-update">${L('Repornește și actualizează', 'Restart and update')}</button>` : L(`Se descarcă Bifrost ${esc(u.version)}...`, `Downloading Bifrost ${esc(u.version)}...`);
   const dl = $('#btn-app-dl'); if (dl) dl.onclick = () => window.vp.act('open', u.page);
   const b = $('#btn-app-update'); if (b) b.onclick = () => window.vp.installUpdate();

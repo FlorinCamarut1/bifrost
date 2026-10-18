@@ -4,6 +4,7 @@
 (function (root) {
   const EN = {
     // ---- navigation / common ----
+    'Biblioteca': 'Library', 'Alege cum începi': 'Choose how to start',
     'Joacă': 'Play', 'JOACĂ': 'PLAY', 'Server': 'Server', 'Moduri': 'Mods', 'Descoperă': 'Discover', 'Modpack': 'Modpack', 'Jurnal': 'Log', 'Setări': 'Settings', 'Start': 'Start',
     'Niciun server': 'No server', 'adaugă unul': 'add one', 'admin': 'admin', 'jucător': 'player', 'profil personal': 'personal profile',
     '＋ Am o invitație': '＋ I have an invite', '＋ Creează server': '＋ Create server', '＋ Profil personal': '＋ Personal profile',
