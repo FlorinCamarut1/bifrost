@@ -1,4 +1,8 @@
-﻿## Bifrost 2.4.0
+﻿## Bifrost 2.4.1
+
+- **New logo** to match the 2.4.0 look: the Algiz rune is now red, with a soft glow, on a black tile with two cut corners. The update changes it inside the app; the desktop shortcut and taskbar icon change with a new install (Bifrost-Setup or the portable zip).
+
+## Bifrost 2.4.0
 
 - **A new layout, in the style of AMD Software: Adrenalin.** The sidebar is gone. Pages are now tabs along the top (Start, Play, Server, Mods), and the open tab is underlined in red. The server selector sits on the right of the header, and Log and Settings are the two icons next to it.
 - Inside Mods, a second row of tabs switches between Library (My mods for players), Discover and Modpack.
