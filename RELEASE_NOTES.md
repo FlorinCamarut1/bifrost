@@ -1,4 +1,13 @@
-﻿## Bifrost 2.4.2
+﻿## Bifrost 2.5.0
+
+- **Enshrouded Patcher** (Nexus mod 91: stack sizes, skill points, build limits, crafting...) can be used instead of EML on an Enshrouded server: Settings → Mods or patcher → Enshrouded Patcher, or "Use as patcher" on its Discover card. Its author says it does not work together with EML, so the server then runs without EML.
+  - Bifrost downloads the patcher from Nexus (a free account clicks "Slow download" once) and builds the options page from the patcher's own config (Server → Enshrouded Patcher → Options).
+  - The server's archive (enshrouded_server.kfc) is patched through your PC and uploaded back; the original stays next to it as .bifrost-orig, a game update is noticed and patched again, and switching back to EML puts the original back.
+  - Friends get the options through the server's list: at PLAY their Bifrost patches their game with them (again after a Steam update).
+  - The patcher is a menu in a console: Bifrost answers it by itself, and when it cannot it opens the patcher's own window with everything filled in - pick the option it names there.
+- Discover's "EML only" filter no longer shows patchers (their description mentions EML because they do not work with it).
+
+## Bifrost 2.4.2
 
 - **The taskbar shows the new logo too.** After 2.4.1 the taskbar button and the Start menu / desktop shortcuts kept the old icon: Windows took it from the installer's copy, which an in-app update never replaced. Bifrost now keeps its current icon next to its settings and points the shortcuts (and a Bifrost pinned to the taskbar) at it, so the icon follows every update. If Windows still shows the old one for a moment, it refreshes after the next sign-in.
 
