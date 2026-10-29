@@ -1,4 +1,10 @@
-﻿## Bifrost 2.5.4
+﻿## Bifrost 2.5.5
+
+- **Enshrouded Patcher options are easier to read.** Each option shows the patcher's own description as text under its name (it was an editable box before).
+- Options where a lower number is faster or cheaper now say so: **crafting time, mana cost, spell cast time, bow charge time, music time**. 0.1 = 10× faster, 1 = normal, 10 = 10× slower. A crafting factor of 10 made crafting 10 times slower.
+- The patcher's own bookkeeping (game folder, output folder, kfc-parser version) is no longer shown in the options or sent to friends.
+
+## Bifrost 2.5.4
 
 - **PLAY on an Enshrouded Patcher server** stopped with "another mod loader is in the game folder (eml.json)": EML's settings file stayed in the game folder and the patcher refuses to run next to it. Bifrost now sets it aside as eml.json.bifrost-off and puts it back if the server goes back to EML.
 
