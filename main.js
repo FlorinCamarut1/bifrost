@@ -1251,6 +1251,9 @@ async function patchGame(gameDir) {
     Profile.restoreGame(gameDir, gdef());
     log('  EML taken out of the game folder (this server uses Enshrouded Patcher)', 'out');
   }
+  // EML's settings file: the patcher refuses to run next to it either (set aside, it comes back with EML)
+  const emlCfg = path.join(gameDir, 'eml.json');
+  if (fs.existsSync(emlCfg)) { fs.rmSync(emlCfg + '.bifrost-off', { force: true }); fs.renameSync(emlCfg, emlCfg + '.bifrost-off'); log('  eml.json set aside (eml.json.bifrost-off)', 'out'); }
   let tool = patcher.current();
   if (!tool || (s.role === 'player' && s.patcherTool?.fileId && tool.fileId !== s.patcherTool.fileId)) {
     const r = await patcherGet({});
