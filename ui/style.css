@@ -811,12 +811,3 @@ div.setting { cursor: default; }
   .pk:hover, .pk:active, .btn:active, .icon-btn:active, .btn.play:active { transform: none; }
   .btn.play { background-image: linear-gradient(180deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 55%); }
 }
-
-/* Enshrouded Patcher options (app.js renderPatcherOptions): the values of one option side by side under its name */
-.pat-fields { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; }
-.pat-f { display: inline-flex; align-items: center; gap: 8px; }
-.pat-f small { margin: 0; color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
-.pat-f .txt.num-in { width: 104px; height: 30px; }
-.cfg-row.pat-off .pat-fields { opacity: .5; }
-.cfg-l .pat-desc, .cfg-sec > .pat-desc { padding: 0 12px 8px; }
-.cfg-l > small + small { margin-top: 2px; color: var(--warn, #f5b041); }

@@ -5,9 +5,6 @@
   const EN = {
     // ---- navigation / common ----
     'Biblioteca': 'Library', 'Alege cum începi': 'Choose how to start',
-    'Moduri sau patcher': 'Mods or patcher', 'EML (moduri)': 'EML (mods)', 'Opțiuni': 'Options', 'Patch-uiește serverul acum': 'Patch the server now', 'Descarcă patcher-ul': 'Download the patcher',
-    'EML încarcă moduri din Descoperă. Enshrouded Patcher schimbă valori din joc (stack-uri, puncte de skill, limite de construit). Nu merg împreună.': 'EML loads mods from Discover. Enshrouded Patcher changes values in the game (stack sizes, skill points, build limits). They do not work together.',
-    'Bifrost patch-uiește arhiva serverului (enshrouded_server.kfc) prin PC-ul tău și jocul fiecărui prieten la JOACĂ, cu aceleași opțiuni.': 'Bifrost patches the server\'s archive (enshrouded_server.kfc) through your PC and every friend\'s game at PLAY, with the same options.',
     'Joacă': 'Play', 'JOACĂ': 'PLAY', 'Server': 'Server', 'Moduri': 'Mods', 'Descoperă': 'Discover', 'Modpack': 'Modpack', 'Jurnal': 'Log', 'Setări': 'Settings', 'Start': 'Start',
     'Niciun server': 'No server', 'adaugă unul': 'add one', 'admin': 'admin', 'jucător': 'player', 'profil personal': 'personal profile',
     '＋ Am o invitație': '＋ I have an invite', '＋ Creează server': '＋ Create server', '＋ Profil personal': '＋ Personal profile',
