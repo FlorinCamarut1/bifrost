@@ -1,4 +1,8 @@
-﻿## Bifrost 2.5.3
+﻿## Bifrost 2.5.4
+
+- **PLAY on an Enshrouded Patcher server** stopped with "another mod loader is in the game folder (eml.json)": EML's settings file stayed in the game folder and the patcher refuses to run next to it. Bifrost now sets it aside as eml.json.bifrost-off and puts it back if the server goes back to EML.
+
+## Bifrost 2.5.3
 
 - **PLAY on an Enshrouded Patcher server** stopped with "Path is a directory: ...\Enshrouded\mods": Bifrost could not take EML's mods link out of the game folder. It now removes only the link (the mods in the profile stay), then patches the game and starts it.
 - The same fix applies when the mods link is pointed at another server's profile.
