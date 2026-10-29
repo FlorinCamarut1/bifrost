@@ -2631,7 +2631,7 @@ async function action(name, arg) {
     case 'patcherSave': {
       if (!s || !isAdmin()) return { ok: false, error: 'Only the admin sets the options.' };
       const o = arg && typeof arg === 'object' && !Array.isArray(arg) ? { ...arg } : {};
-      delete o.gameDirectory;
+      for (const k of patcherLib.BOOKKEEPING) delete o[k];
       s.patcherOptions = o; saveSettings(); send('settings', publicSettings());
       if (usesPatcher(s) && s.conn) setTimeout(() => syncNow('patcher options'), 300);
       return { ok: true };
