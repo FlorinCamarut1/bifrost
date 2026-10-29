@@ -178,17 +178,6 @@
       </div>
     </div>
 
-    <!-- ENSHROUDED PATCHER (Enshrouded servers in patcher mode, lib/patcher.js) -->
-    <div class="card nv-only" id="patcher-card" data-role="admin" hidden>
-      <div class="row between"><h2>Enshrouded Patcher</h2><span class="status-pill" id="patcher-pill"><span class="dot"></span><span id="patcher-pill-text">...</span></span></div>
-      <p class="muted small" id="patcher-sub">Bifrost patch-uiește arhiva serverului (enshrouded_server.kfc) prin PC-ul tău și jocul fiecărui prieten la JOACĂ, cu aceleași opțiuni.</p>
-      <div class="row gap wrap">
-        <button class="btn primary" id="btn-patcher-opts">Opțiuni</button>
-        <button class="btn" id="btn-patcher-patch">Patch-uiește serverul acum</button>
-        <button class="btn" id="btn-patcher-get">Descarcă patcher-ul</button>
-      </div>
-    </div>
-
     <div class="card">
       <div class="row between"><h2>Lista pentru prieteni</h2><span class="status-pill" id="list-pill"><span class="dot"></span><span id="list-pill-text">...</span></span></div>
       <p class="muted small" id="list-sub">Bifrost-ul prietenilor citește lista asta și le instalează exact modurile serverului.</p>
@@ -337,7 +326,6 @@
       <h2>Joc</h2>
       <label class="setting"><div><b id="game-dir-label">Folderul Valheim</b><small id="game-detected">Găsit automat prin Steam. Completează doar dacă nu e găsit.</small></div><input data-set="gameDir" class="txt" placeholder="automat"></label>
       <label class="vh-only setting"><div><b>Consola BepInEx</b><small>Fereastra neagră de lângă joc. Jurnalul complet rămâne oricum în BepInEx/LogOutput.log.</small></div><select class="select" data-set="bepConsoleMode"><option value="nowarn">Fără warning-uri</option><option value="errors">Doar erori</option><option value="off">Ascunsă</option><option value="all">Tot (cu warning-uri)</option></select></label>
-      <div class="nv-only setting" data-role="admin"><div><b>Moduri sau patcher</b><small id="loader-mode-state">EML încarcă moduri din Descoperă. Enshrouded Patcher schimbă valori din joc (stack-uri, puncte de skill, limite de construit). Nu merg împreună.</small></div><select class="select" id="sel-loader"><option value="eml">EML (moduri)</option><option value="patcher">Enshrouded Patcher</option></select></div>
       <div class="setting"><div><b>Încărcătorul de moduri</b><small id="loader-state">Bifrost pune lângă valheim.exe încărcătorul BepInEx care citește profilul serverului ales. Ce era acolo înainte e păstrat și se poate pune înapoi.</small></div><button class="btn" data-act="restoreLoader" id="btn-restore-loader">Restaurează anteriorul</button></div>
     </div>
 
