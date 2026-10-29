@@ -1202,6 +1202,8 @@ true`, { timeout: 600000 });
     }
     fs.rmSync(work, { recursive: true, force: true }); fs.mkdirSync(work, { recursive: true });
     for (const f of files) if (fs.existsSync(path.join(origDir, f))) fs.copyFileSync(path.join(origDir, f), path.join(work, f));
+    // (the patcher takes a folder for a game folder only when the game's exe is in it: "Invalid game directory")
+    fs.writeFileSync(path.join(work, gdef(s).server.exe), '');
     setProgress({ phase: 'install', done: 0, total: 1, text: 'Enshrouded Patcher (server)' });
     await patcher.run({ gameDir: work, options: s.patcherOptions, mode: 'fresh', kind: 'server' });
     ps.patched = await localId(work);
