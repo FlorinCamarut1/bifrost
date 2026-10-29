@@ -1,4 +1,10 @@
-﻿## Bifrost 2.5.5
+﻿## Bifrost 2.6.0
+
+- **Enshrouded Patcher is out of Bifrost again**: an Enshrouded server loads EML mods only, as before 2.5.0. A server that was set to the patcher becomes an EML server by itself. In Steam, Enshrouded → Properties → Installed Files → Verify integrity puts the game's own files back.
+- **XHL mods (and other EML mods that carry a copy of EML) install again.** They stopped with "Already installed: EML - Enshrouded Mod Loader has the same dbghelp.dll". That copy is the loader, not the mod, and only the mod is installed.
+- Kept from 2.5.x: taking EML's mods link out of the game folder works, and eml.json comes back with EML.
+
+## Bifrost 2.5.5
 
 - **Enshrouded Patcher options are easier to read.** Each option shows the patcher's own description as text under its name (it was an editable box before).
 - Options where a lower number is faster or cheaper now say so: **crafting time, mana cost, spell cast time, bow charge time, music time**. 0.1 = 10× faster, 1 = normal, 10 = 10× slower. A crafting factor of 10 made crafting 10 times slower.
