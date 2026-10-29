@@ -1,4 +1,9 @@
-﻿## Bifrost 2.5.0
+﻿## Bifrost 2.5.1
+
+- **Enshrouded Patcher on the server:** every patch failed with "the patcher finished but enshrouded_server.kfc did not change". The patcher only accepts a folder that has the game's exe in it, and the folder Bifrost patches the server's archive in had only the archive. It now passes the check.
+- When the patcher stops, the error says the step that failed, from the patcher's own log.
+
+## Bifrost 2.5.0
 
 - **Enshrouded Patcher** (Nexus mod 91: stack sizes, skill points, build limits, crafting...) can be used instead of EML on an Enshrouded server: Settings → Mods or patcher → Enshrouded Patcher, or "Use as patcher" on its Discover card. Its author says it does not work together with EML, so the server then runs without EML.
   - Bifrost downloads the patcher from Nexus (a free account clicks "Slow download" once) and builds the options page from the patcher's own config (Server → Enshrouded Patcher → Options).
