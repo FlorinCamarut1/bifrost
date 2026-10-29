@@ -1,4 +1,10 @@
-﻿## Bifrost 2.5.2
+﻿## Bifrost 2.5.3
+
+- **PLAY on an Enshrouded Patcher server** stopped with "Path is a directory: ...Enshroudedmods": Bifrost could not take EML's mods link out of the game folder. It now removes only the link (the mods in the profile stay), then patches the game and starts it.
+- The same fix applies when the mods link is pointed at another server's profile.
+- On a patcher server, the Play page no longer says the game starts "with EML".
+
+## Bifrost 2.5.2
 
 - **Enshrouded Patcher on the server:** the patch stopped at Unpack. kfc-parser (which the patcher uses) reads the game's data types out of the server's enshrouded_server.exe, and Bifrost had only put an empty stand-in next to the archive. The server's real exe (22 MB) is now downloaded once, again only after a game update, and is never uploaded back.
 
