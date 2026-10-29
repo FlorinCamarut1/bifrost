@@ -1171,12 +1171,14 @@ async function patchServer({ force } = {}) {
   const tool = patcher.current();
   if (!tool) throw new Error('Enshrouded Patcher is not downloaded yet: Server → Enshrouded Patcher → Download');
   const files = patcherLib.archiveFiles('server'), [KF, RES] = files;
+  // (kfc-parser reads the game's types out of the exe when its reflection_data.json does not match the archive yet)
+  const EXE = gdef(s).server.exe;
   const ps = { ...(s.patcherServer || {}) }, opts = patcherLib.optionsHash(s.patcherOptions);
   const base = path.join(serverDir(s.id), 'patcher'), origDir = path.join(base, 'original'), work = path.join(base, 'work');
   const bytes = what => (got, total) => setProgress({ phase: 'install', done: 0, total: 1, text: what, bytes: got, totalBytes: total || 0 });
   const localId = async dir => (await Promise.all(files.map(f => fs.existsSync(path.join(dir, f)) ? patcherLib.fileSha(path.join(dir, f)) : '-'))).join(':');
   const out = await tr.run(`cd ${shq(tr.serverDir)} || exit 1
-for f in ${files.map(shq).join(' ')}; do [ -f "$f" ] && echo "sha $f $(sha256sum < "$f" | cut -d' ' -f1)"; done
+for f in ${[...files, EXE].map(shq).join(' ')}; do [ -f "$f" ] && echo "sha $f $(sha256sum < "$f" | cut -d' ' -f1)"; done
 if [ -f ${shq(`${KF}.bak`)} ] && [ ! ${shq(`${KF}.bak`)} -ot ${shq(RES)} ] && [ "$(head -c 4 ${shq(`${KF}.bak`)})" = "$(head -c 4 ${shq(KF)})" ]; then echo bak; fi
 true`, { timeout: 600000 });
   const sha = {}; let bak = false;
@@ -1200,10 +1202,13 @@ true`, { timeout: 600000 });
       for (const f of files) if (sha[f]) await tr.getFile(tr.serverDir, `${f}.bifrost-orig`, path.join(origDir, f), bytes(`${f} ↓`));
       if (await localId(origDir) !== ps.orig) throw new Error(`the server's *.bifrost-orig files are not the original Bifrost kept - validate the server files (SteamCMD) and patch again`);
     }
+    // the server's exe beside the archive: the patcher takes a folder for a game folder only with it ("Invalid game
+    // directory") and kfc-parser reads the game's types from it; it is never uploaded back
+    const exeLocal = path.join(origDir, EXE);
+    if (sha[EXE] && (!fs.existsSync(exeLocal) || ps.exeSha !== sha[EXE])) { await tr.getFile(tr.serverDir, EXE, exeLocal, bytes(`${EXE} ↓`)); ps.exeSha = sha[EXE]; }
+    if (!fs.existsSync(exeLocal)) throw new Error(`${EXE} is not in ${tr.serverDir} - the patcher needs it to read the archive`);
     fs.rmSync(work, { recursive: true, force: true }); fs.mkdirSync(work, { recursive: true });
-    for (const f of files) if (fs.existsSync(path.join(origDir, f))) fs.copyFileSync(path.join(origDir, f), path.join(work, f));
-    // (the patcher takes a folder for a game folder only when the game's exe is in it: "Invalid game directory")
-    fs.writeFileSync(path.join(work, gdef(s).server.exe), '');
+    for (const f of [...files, EXE]) if (fs.existsSync(path.join(origDir, f))) fs.copyFileSync(path.join(origDir, f), path.join(work, f));
     setProgress({ phase: 'install', done: 0, total: 1, text: 'Enshrouded Patcher (server)' });
     await patcher.run({ gameDir: work, options: s.patcherOptions, mode: 'fresh', kind: 'server' });
     ps.patched = await localId(work);
