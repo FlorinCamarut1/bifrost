@@ -49,6 +49,7 @@ const importers = require('./lib/importers');
 const codeupdate = require('./lib/codeupdate');
 const { run7z } = require('./lib/archive');
 const games = require('./lib/games');
+const patcherLib = require('./lib/patcher');
 
 const APP_ID = 'io.github.florincamarut1.bifrost';
 const REPO = 'FlorinCamarut1/bifrost';
@@ -95,6 +96,8 @@ const SERVER_DEFAULTS = {
   // PLAY joins the server straight away (Valheim's +connect / -password); address empty = from the list / server logs
   directJoin: true, joinAddress: '', joinPassEnc: null,
   tailscaleIp: null,   // admin, games without a relay: the server machine's Tailscale address (friendAddress)
+  // Enshrouded: 'eml' (mods) or 'patcher' (Enshrouded Patcher's options; a player's come from the list)
+  modLoader: 'eml', patcherOptions: {}, patcherServer: null, patcherTool: null,
 };
 // settings.json that does not parse (a crash while writing, a bad hand edit) is never replaced with empty defaults:
 // the last good copy (settings.json.bak, refreshed at every start) is used and the broken file is kept beside it
@@ -189,7 +192,7 @@ const publicSettings = () => {
       autoPublish: s.autoPublish, publishAddress: s.publishAddress, publishPassword: !!s.publishPassword, hasToken: !!s.tsTokenEnc,
       listPassword: s.role === 'player' && !!manifest?.server?.password,
       // dockerServer = the valheim-server image (join codes, server settings); other games' containers only restart
-      canRestart: !!(s.conn && (s.conn.type === 'ssh-docker' || s.conn.restartCmd)), dockerServer: s.conn?.type === 'ssh-docker' && isValheim(s), ensSettings: s.role === 'admin' && !!s.conn && gdef(s).id === 'enshrouded',
+      canRestart: !!(s.conn && (s.conn.type === 'ssh-docker' || s.conn.restartCmd)), dockerServer: s.conn?.type === 'ssh-docker' && isValheim(s), ensSettings: s.role === 'admin' && !!s.conn && gdef(s).id === 'enshrouded', patcher: patcherInfo(s),
       directJoin: s.directJoin !== false, joinAddress: s.joinAddress || '', hasJoinPass: !!dec(s.joinPassEnc), joinPassBroken: !!s.joinPassEnc && !dec(s.joinPassEnc), joinTarget: joinTarget(), friendAddress: friendAddress(), friendAuto: !s.joinAddress && !!friendAddress(), viaTailscale: isTailscaleAddr(friendAddress()), tailscale: tsLocal } : {}),
   };
 };
@@ -545,6 +548,8 @@ async function checkUpdates(maxAgeMs = 0) {
 // INSTALLING (Thunderstore + Nexus) into the current server's profile
 // =====================================================================================================
 const nexus = new Nexus({ fetch: fetchN, appName: 'Bifrost', appVersion: OWN_VERSION, game: gdef().nexus });
+// (test hook: BIFROST_PATCHER_CMD='["node","fake-patcher.js"]' drives a stand-in instead of the tool's exe)
+const patcher = new patcherLib.Patcher({ dir: path.join(DATA, 'tools', 'enshrouded-patcher'), log: (l, k) => log(l, k), cmd: process.env.BIFROST_PATCHER_CMD ? JSON.parse(process.env.BIFROST_PATCHER_CMD) : null });
 const installing = {};
 let nexusWaiting = [];
 // PLAY that stopped for Nexus files (free account: one click per file on the site) starts the game by itself once the
@@ -694,6 +699,11 @@ async function refreshManifest() {
     manifest = await listhost.fetchList(fetchN, s.list);
     writeJson(listCache(), manifest);
     manifestErr = null;
+    if (s.role === 'player') {
+      const pm = manifest.patcher && typeof manifest.patcher === 'object' ? manifest.patcher : null;
+      s.modLoader = pm ? 'patcher' : 'eml'; s.patcherOptions = pm?.options || {}; s.patcherTool = pm?.fileId ? { fileId: +pm.fileId, version: pm.version || '' } : null;
+      saveSettings();
+    }
     if (s.role === 'player' && manifest.server?.name && manifest.server.name !== s.name) { s.name = manifest.server.name; saveSettings(); }
     // the list says which game the server is: an invite added by a Bifrost older than 2.0 was saved as Valheim (a
     // friend's Enshrouded server showed the Valheim folder and "BepInEx is not installed", 2026-10-15)
@@ -716,7 +726,7 @@ function desired() {
   for (const n of manifest.nexus || []) if (n.required || s.nexusChosen[n.key])
     out.push({ key: n.key, full: n.key, ver: String(n.version || n.fileId), role: n.required ? 'required' : 'recommended', source: 'nexus', title: n.title, modId: n.modId, fileId: n.fileId });
   // EML games: the loader itself (not on Nexus), the version the admin has
-  if (gdef(s).loader === 'eml') out.unshift({ key: EML, full: EML, ver: manifest.loader?.ver || getProfile().packages[EML]?.ver || 'latest', role: 'required', source: 'github', title: 'EML - Enshrouded Mod Loader' });
+  if (gdef(s).loader === 'eml' && !usesPatcher(s)) out.unshift({ key: EML, full: EML, ver: manifest.loader?.ver || getProfile().packages[EML]?.ver || 'latest', role: 'required', source: 'github', title: 'EML - Enshrouded Mod Loader' });
   return out.sort((a, b) => (b.full === BEPINEX) - (a.full === BEPINEX));
 }
 function playerMods() {
@@ -735,7 +745,7 @@ function playerInfo() {
   const bytes = plan.install.reduce((t, d) => t + (catalogIndex.get(d.full)?.size || 0), 0);
   return {
     manifest, error: manifestErr, at: manifestAt, role: s.role, progress, busy: !!job, status,
-    game: { ...game, name: gdef().name, ...(game.game ? Profile.gameOwner(game.game, gdef()) : {}), backup: !!(game.game && fs.existsSync(path.join(game.game, 'bifrost-backup'))) },
+    game: { ...game, name: gdef().name, ...(game.game ? (usesPatcher() ? patcherOwner(game.game) : Profile.gameOwner(game.game, gdef())) : {}), backup: !!(game.game && fs.existsSync(path.join(game.game, 'bifrost-backup'))) },
     plan: { install: plan.install.map(d => ({ key: d.key, ver: d.ver, have: pr.packages[d.key]?.ver || null, source: d.source, title: d.title })), remove: plan.remove, bytes },
     required: manifest ? manifest.required.length + (manifest.nexus || []).filter(n => n.required).length : 0,
     nexusNeeded: (manifest?.nexus || []).filter(n => n.required && !pr.packages[`nexus-${n.modId}`]).map(n => n.title),
@@ -915,10 +925,10 @@ async function launchGame() {
   try {
     if (isValheim()) try { getProfile().setConsole(G.bepConsoleMode || 'nowarn'); } catch (e) { log(`BepInEx.cfg: ${e.message}`, 'error'); }
     try { guardConfigs(); } catch (e) { log(`config guard: ${e.message}`, 'error'); }
-    if (gdef().loader === 'eml' && !getProfile().emlCompat(game.game).ok) {
+    if (gdef().loader === 'eml' && !usesPatcher() && !getProfile().emlCompat(game.game).ok) {
       await tryNewerEml();
     }
-    const prep = getProfile().prepareGame(game.game);
+    const prep = usesPatcher() ? await patchGame(game.game) : getProfile().prepareGame(game.game);
     if (prep?.emlOff) {
       const c = prep.emlOff;
       log(`EML ${c.ver} cannot read this ${name} version (data file ${c.magic}) - the game starts WITHOUT mods until a newer EML is released (github.com/${EML_REPO})`, 'error');
@@ -1096,6 +1106,174 @@ function syncGameOpts() {
 }
 // EML games: the loader (dbghelp.dll + its files) goes next to the dedicated server's exe; true when something was sent
 let loaderEnvWarned = false;
+// =====================================================================================================
+// ENSHROUDED PATCHER (lib/patcher.js): a server whose admin turned it on uses the patcher instead of EML (its author
+// says they do not work together). The server's archive is patched through this PC (Windows tool, Linux server),
+// every player's game at PLAY, with the options from the server's list.
+// =====================================================================================================
+const usesPatcher = (s = srv()) => !!s && gdef(s).id === 'enshrouded' && s.modLoader === 'patcher';
+const PATCHER_CLIENT = path.join(DATA, 'patcher-client.json');   // game folder -> { fp, opts }: what was patched there
+function patcherInfo(s) {
+  if (!s || gdef(s).id !== 'enshrouded') return null;
+  const t = patcher.current(), ps = s.patcherServer;
+  return {
+    on: usesPatcher(s), tool: t ? { fileId: t.fileId, version: t.version } : null, want: s.role === 'player' ? s.patcherTool || null : null,
+    server: ps ? { at: ps.at, upToDate: ps.options === patcherLib.optionsHash(s.patcherOptions) && ps.tool === t?.fileId } : null,
+    options: Object.keys(s.patcherOptions || {}).length, pending: !!nexusPending[patcherLib.MOD_ID],
+  };
+}
+// the tool from Nexus (the file the list names for players, the newest for the admin): an archive already downloaded
+// is reused; premium downloads now, a free account clicks "Slow download" and the nxm link comes back to handleLink
+async function patcherGet({ fileId, version, nxm } = {}) {
+  const s = srv();
+  if (!fileId) {
+    if (s?.role === 'player' && s.patcherTool?.fileId) ({ fileId, version } = s.patcherTool);
+    else { const f = Nexus.pickMain(await nexus.modFiles(patcherLib.MOD_ID)); if (!f) throw new Error('Enshrouded Patcher has no files on Nexus'); fileId = f.fileId; version = f.version; }
+  }
+  const cur = patcher.current();
+  if (cur && cur.fileId === +fileId) return { ok: true, tool: cur };
+  const dir = path.join(getProfile().cacheDir, 'nexus');
+  let archive = null;
+  try { archive = fs.readdirSync(dir).filter(n => n.startsWith(`${patcherLib.MOD_ID}-${fileId}-`) && !n.endsWith('.part')).map(n => path.join(dir, n))[0] || null; } catch { }
+  if (!archive) {
+    const key = dec(G.nexusKeyEnc);
+    if (!key) return { ok: false, needKey: true, error: 'Enshrouded Patcher comes from Nexus Mods: put your Nexus key in Settings → Nexus Mods first.' };
+    if (!nxm && !G.nexusUser?.premium) {
+      nexusPending[patcherLib.MOD_ID] = { modId: patcherLib.MOD_ID, fileId: +fileId, title: 'Enshrouded Patcher', version, at: Date.now() };
+      send('nexusPending', nexusPending); send('settings', publicSettings());
+      shell.openExternal(Nexus.filesPage(patcherLib.MOD_ID, fileId));
+      return { ok: true, waiting: true };
+    }
+    nexus.key = key;
+    const url = await nexus.downloadUrl(patcherLib.MOD_ID, fileId, nxm);
+    const name = (decodeURIComponent(new URL(url).pathname.split('/').pop() || '').replace(/[^\w.\- ]+/g, '_') || 'file').slice(-80);
+    archive = await getProfile().download(url, path.join(dir, `${patcherLib.MOD_ID}-${fileId}-${name}`),
+      (got, total) => setProgress({ ...(progress || { phase: 'install', done: 0, total: 1 }), text: 'Enshrouded Patcher', bytes: got, totalBytes: total }));
+  }
+  const tool = await patcher.install({ archive, fileId: +fileId, version: version || '' });
+  delete nexusPending[patcherLib.MOD_ID]; send('nexusPending', nexusPending);
+  log(`  Enshrouded Patcher ${tool.version} ready`, 'done');
+  send('settings', publicSettings());
+  return { ok: true, tool };
+}
+// the server: its original archive (enshrouded_server.kfc + .kfc_resources) is kept on this PC and on the server
+// (*.bifrost-orig), patched here and uploaded back. An archive on the server that is neither the one we uploaded nor
+// the original we know is the game's own (first patch, a game update) and becomes the new original - except the
+// index EML rewrote in place: then its .kfc.bak is the original, when it is not older than the resources file (a .bak
+// from before a game update belongs to the old version: Steam rewrote .kfc and .kfc_resources together).
+// -> true when the server got a new archive (it needs a restart)
+async function patchServer({ force } = {}) {
+  const s = srv();
+  if (!isAdmin() || !usesPatcher(s) || !s.conn) return false;
+  await fixDockerServerDir();
+  const tr = transport();
+  if (!tr.serverDir || !tr.run || !tr.getFile) throw new Error('Enshrouded Patcher patches a server reached over SSH (with or without Docker), not FTP or a server on this PC');
+  const tool = patcher.current();
+  if (!tool) throw new Error('Enshrouded Patcher is not downloaded yet: Server → Enshrouded Patcher → Download');
+  const files = patcherLib.archiveFiles('server'), [KF, RES] = files;
+  const ps = { ...(s.patcherServer || {}) }, opts = patcherLib.optionsHash(s.patcherOptions);
+  const base = path.join(serverDir(s.id), 'patcher'), origDir = path.join(base, 'original'), work = path.join(base, 'work');
+  const bytes = what => (got, total) => setProgress({ phase: 'install', done: 0, total: 1, text: what, bytes: got, totalBytes: total || 0 });
+  const localId = async dir => (await Promise.all(files.map(f => fs.existsSync(path.join(dir, f)) ? patcherLib.fileSha(path.join(dir, f)) : '-'))).join(':');
+  const out = await tr.run(`cd ${shq(tr.serverDir)} || exit 1
+for f in ${files.map(shq).join(' ')}; do [ -f "$f" ] && echo "sha $f $(sha256sum < "$f" | cut -d' ' -f1)"; done
+if [ -f ${shq(`${KF}.bak`)} ] && [ ! ${shq(`${KF}.bak`)} -ot ${shq(RES)} ] && [ "$(head -c 4 ${shq(`${KF}.bak`)})" = "$(head -c 4 ${shq(KF)})" ]; then echo bak; fi
+true`, { timeout: 600000 });
+  const sha = {}; let bak = false;
+  for (const l of out.split('\n')) { const m = l.match(/^sha (\S+) ([0-9a-f]{64})$/); if (m) sha[m[1]] = m[2]; if (l.trim() === 'bak') bak = true; }
+  if (!sha[KF]) throw new Error(`${KF} is not in ${tr.serverDir}`);
+  const remote = files.map(f => sha[f] || '-').join(':');
+  if (!force && remote === ps.patched && ps.options === opts && ps.tool === tool.fileId) return false;
+  try {
+    if (remote !== ps.patched && remote !== ps.orig) {
+      log(`  ${KF}: the server's own archive (first patch or a game update)${bak ? ' - EML had rewritten the index, its .bak is the original' : ''} - downloading it`, 'out');
+      fs.rmSync(origDir, { recursive: true, force: true });
+      for (const f of files) if (sha[f]) {
+        const from = f === KF && bak ? `${KF}.bak` : f;
+        await tr.getFile(tr.serverDir, from, path.join(origDir, f), bytes(`${f} ↓`));
+        await tr.copy(tr.serverDir, from, `${f}.bifrost-orig`);
+      }
+      ps.orig = await localId(origDir); ps.patched = null;
+    } else if (await localId(origDir) !== ps.orig) {
+      log(`  ${KF}: the original comes from the server's copy (*.bifrost-orig)`, 'out');
+      fs.rmSync(origDir, { recursive: true, force: true });
+      for (const f of files) if (sha[f]) await tr.getFile(tr.serverDir, `${f}.bifrost-orig`, path.join(origDir, f), bytes(`${f} ↓`));
+      if (await localId(origDir) !== ps.orig) throw new Error(`the server's *.bifrost-orig files are not the original Bifrost kept - validate the server files (SteamCMD) and patch again`);
+    }
+    fs.rmSync(work, { recursive: true, force: true }); fs.mkdirSync(work, { recursive: true });
+    for (const f of files) if (fs.existsSync(path.join(origDir, f))) fs.copyFileSync(path.join(origDir, f), path.join(work, f));
+    setProgress({ phase: 'install', done: 0, total: 1, text: 'Enshrouded Patcher (server)' });
+    await patcher.run({ gameDir: work, options: s.patcherOptions, mode: 'fresh', kind: 'server' });
+    ps.patched = await localId(work);
+    // the resources first: the index points into them
+    for (const f of [RES, KF]) if (fs.existsSync(path.join(work, f))) await tr.putFile(path.join(work, f), tr.serverDir, f, bytes(`${f} ↑`));
+    Object.assign(ps, { options: opts, tool: tool.fileId, at: Date.now() });
+    s.patcherServer = ps; saveSettings();
+    log(`  ${KF} patched (Enshrouded Patcher ${tool.version}) and uploaded`, 'out');
+    return true;
+  } finally { setProgress(null); fs.rmSync(work, { recursive: true, force: true }); }
+}
+// back to EML: the server gets its original archive again (only when it still has the one Bifrost uploaded)
+async function restoreServerKfc() {
+  const s = srv(), ps = s?.patcherServer;
+  if (!ps || !s.conn) return false;
+  await fixDockerServerDir();
+  const tr = transport(), files = patcherLib.archiveFiles('server');
+  if (tr.serverDir && tr.run) {
+    const out = await tr.run(`cd ${shq(tr.serverDir)} || exit 1; for f in ${files.map(shq).join(' ')}; do if [ -f "$f" ]; then sha256sum < "$f" | cut -d' ' -f1; else echo -; fi; done`, { timeout: 600000 });
+    if (out.trim().split(/\s+/).join(':') === ps.patched) {
+      for (const f of [...files].reverse()) await tr.copy(tr.serverDir, `${f}.bifrost-orig`, f).catch(e => log(`  ${f}: ${e.message}`, 'error'));
+      log(`  ${files[0]}: the original is back on the server`, 'out');
+    }
+  }
+  s.patcherServer = null; saveSettings();
+  return true;
+}
+// EML off the server while the patcher is on (renamed, it comes back when the server goes back to EML)
+async function emlOffServer(tr) {
+  if (!tr.serverDir || !tr.run) return;
+  const o = await tr.run(`cd ${shq(tr.serverDir)} 2>/dev/null || exit 0; if [ -f dbghelp.dll ]; then mv -f dbghelp.dll dbghelp.dll.eml-off && echo off; fi; true`);
+  if (/off/.test(o)) log('  EML taken off the server (it uses Enshrouded Patcher)', 'out');
+}
+// this PC's game at PLAY: Patch Fresh when the archive is the game's own (first time, after a Steam update),
+// Repatch when only the options (or the tool) changed since the last patch here
+async function patchGame(gameDir) {
+  const s = srv();
+  let junction = false; try { junction = fs.lstatSync(path.join(gameDir, 'mods')).isSymbolicLink(); } catch { }
+  if (junction || patcherLib.EXTERNAL.some(f => fs.existsSync(path.join(gameDir, f)))) {
+    Profile.restoreGame(gameDir, gdef());
+    log('  EML taken out of the game folder (this server uses Enshrouded Patcher)', 'out');
+  }
+  let tool = patcher.current();
+  if (!tool || (s.role === 'player' && s.patcherTool?.fileId && tool.fileId !== s.patcherTool.fileId)) {
+    const r = await patcherGet({});
+    if (r.waiting) throw new Error('Enshrouded Patcher is downloaded from Nexus: press "Slow download" on the page that opened, then PLAY again.');
+    if (!r.ok) throw new Error(r.error);
+    tool = r.tool;
+  }
+  const all = readJson(PATCHER_CLIENT, {}), key = path.resolve(gameDir).toLowerCase();
+  const opts = `${tool.fileId}:${patcherLib.optionsHash(s.patcherOptions)}`, fp = patcherLib.archivePrint(gameDir, 'client'), was = all[key] || {};
+  if (was.fp === fp && was.opts === opts) return null;
+  const mode = was.fp === fp ? 'repatch' : 'fresh';
+  log(`  Enshrouded Patcher: ${mode === 'fresh' ? 'Patch Fresh (the game\'s own archive)' : 'Repatch (new options)'}`, 'out');
+  setProgress({ phase: 'install', done: 0, total: 1, text: 'Enshrouded Patcher' });
+  try { await patcher.run({ gameDir, options: s.patcherOptions, mode, kind: 'client' }); } finally { setProgress(null); }
+  all[key] = { fp: patcherLib.archivePrint(gameDir, 'client'), opts, at: Date.now() };
+  writeJson(PATCHER_CLIENT, all);
+  log(`  ${patcherLib.KFC.client} patched`, 'out');
+  return null;
+}
+// is this game folder patched by Bifrost right now? (Steam's update or "verify" brings the original back)
+function patcherOwner(gameDir) {
+  const was = readJson(PATCHER_CLIENT, {})[path.resolve(gameDir).toLowerCase()];
+  return { owner: was && was.fp === patcherLib.archivePrint(gameDir, 'client') ? 'patcher' : 'none', target: '' };
+}
+// the list entry players follow
+function patcherListEntry(s) {
+  const t = patcher.current();
+  return { modId: patcherLib.MOD_ID, fileId: t?.fileId || null, version: t?.version || null, options: s.patcherOptions || {} };
+}
+
 async function syncLoader(tr) {
   if (gdef().loader !== 'eml') return false;
   await fixDockerServerDir();
@@ -1171,7 +1349,8 @@ async function syncNow(reason) {
       pluginsDir: pluginsDir(), transport: tr, builtin: new RegExp(s.builtin || 'BepInExPack', 'i'), allMods: s.syncAllMods,
       confirmMassRemoval: manual ? confirmMass : null, log: l => log(l, 'out'), ...syncGameOpts(),
     });
-    if (await syncLoader(tr)) { st.restartPending = true; r.copy.push('EML'); }
+    if (usesPatcher()) { await emlOffServer(tr); if (await patchServer()) { st.restartPending = true; r.copy.push('Enshrouded Patcher'); } }
+    else if (await syncLoader(tr)) { st.restartPending = true; r.copy.push('EML'); }
     writeState(st);
     for (const n of r.newMods) log(`  ${n.name} -> ${n.side} (${n.why})`, 'out');
     const what = [r.copy.length && `Updated: ${r.copy.join(', ')}`, r.remove.length && `Removed: ${r.remove.join(', ')}`,
@@ -1825,7 +2004,7 @@ const listFriendAddress = s => { const a = friendAddress(s); return a && (s.publ
 function buildList() {
   const s = srv(), pk = getProfile().packages;
   return buildServerList({
-    game: gdef().id, loader: pk[EML] ? { ver: pk[EML].ver } : null,
+    game: gdef().id, loader: pk[EML] && !usesPatcher(s) ? { ver: pk[EML].ver } : null, patcher: usesPatcher(s) ? patcherListEntry(s) : null,
     mods: adminMods().mods, nexusLinks: s.nexusLinks,
     server: { name: s.name, world: s.world, joinCode: status.codeBroken ? null : status.joinCode || null, joinCodeAt: status.joinCodeAt || null, address: !isValheim(s) ? listFriendAddress(s) : s.publishAddress ? status.publicIp || null : null, ...(!isValheim(s) && isTailscaleAddr(listFriendAddress(s)) ? { tailscale: true } : {}),
       // opt-in: everyone with the invite link can read it (the list is the same link that gives them the IP)
@@ -2004,6 +2183,7 @@ async function createServer(cfg) {
 }
 // fill the current profile: other mod managers, a profile code or what the server already runs
 async function importInto(source) {
+  if (usesPatcher() && source.kind !== 'server') return { ok: false, error: 'This server uses Enshrouded Patcher, not EML mods: its options are on the Server page.' };
   if (gdef().loader === 'eml' && source.kind !== 'server') {
     // Enshrouded: the loader; mods come from Discover (Nexus)
     setJob({ kind: 'import', label: 'Installing EML', started: Date.now() });
@@ -2114,6 +2294,8 @@ async function nexusInstall({ modId, fileId, title, version, fileName }) {
     fileId = f.fileId; version = version || f.version;
   }
   const e = { modId: +modId, fileId: +fileId, title, version, fileName };
+  // (not an EML mod: the patcher has its own place, lib/patcher.js)
+  if (e.modId === patcherLib.MOD_ID) return patcherGet({ fileId: e.fileId, version });
   if (G.nexusUser?.premium) { if (job || queue.length || pumping) return enqueue(`Install ${e.title} (Nexus)`, `nexus-${e.modId}`, () => nexusInstallNow(e)); return nexusInstallNow(e); }
   nexusPending[e.modId] = { ...e, at: Date.now() };
   send('nexusPending', nexusPending);
@@ -2132,6 +2314,12 @@ async function handleLink(url) {
   if (x.game !== gdef().nexus.domain) return toast(`The link is for ${x.game}, but the open server is a ${gdef().name} server - switch to its server first.`, 'error');
   if (job) return toast('Already working - press again when it is done.', 'error');
   if (!srv()) return toast('Add or create a server first.', 'error');
+  if (x.modId === patcherLib.MOD_ID) {
+    const f = (await nexus.modFiles(x.modId).catch(() => [])).find(y => +y.fileId === +x.fileId);
+    try { const r = await patcherGet({ fileId: x.fileId, version: f?.version || '', nxm: x }); toast(r.ok ? `Enshrouded Patcher is ready${srv().role === 'player' ? ' - press PLAY' : ''}.` : r.error, r.ok ? 'ok' : 'error'); }
+    catch (err) { log(`Enshrouded Patcher: ${err.message}`, 'error'); toast(err.message, 'error'); }
+    return;
+  }
   const pend = nexusPending[x.modId];
   const want = nexusWaiting.find(n => n.modId === x.modId) || (manifest?.nexus || []).filter(n => n.modId === x.modId)
     .map(n => ({ modId: n.modId, title: n.title, version: n.version, role: n.required ? 'required' : 'recommended' }))[0];
@@ -2398,9 +2586,51 @@ async function action(name, arg) {
     case 'findGame': game = await findGame(); send('player', playerInfo()); return { ok: !!game.game, game };
     case 'restoreLoader': {
       if (!game.game) return { ok: false, error: 'The game folder is not found.' };
+      // the patched archive: Steam's "verify" brings the game's own back
+      if (usesPatcher()) { shell.openExternal(`steam://validate/${gdef().appId}`); return { ok: true, steam: true }; }
       const ok = Profile.restoreGame(game.game, gdef());
       send('player', playerInfo());
       return ok ? { ok: true } : { ok: false, error: 'There is no backup (Bifrost has not replaced anything).' };
+    }
+    // ----- Enshrouded Patcher -----
+    case 'patcherGet': try { return await patcherGet({}); } catch (e) { return { ok: false, error: e.message }; }
+    case 'patcherMode': {
+      if (!s || !isAdmin() || gdef(s).id !== 'enshrouded') return { ok: false, error: 'Only for an Enshrouded server you run.' };
+      const to = arg === 'patcher' ? 'patcher' : 'eml';
+      if ((s.modLoader || 'eml') === to) return { ok: true };
+      s.modLoader = to; saveSettings();
+      log(`${s.name}: ${to === 'patcher' ? 'Enshrouded Patcher instead of EML' : 'EML again (Enshrouded Patcher off)'}`, 'start');
+      try {
+        if (to === 'eml') {
+          if (await restoreServerKfc()) { const st = readState(); st.restartPending = true; writeState(st); }
+          if (game.game && patcherOwner(game.game).owner === 'patcher') toast('The game on this PC is still patched: Steam → Enshrouded → Properties → Installed Files → Verify integrity (Settings → Mod loader opens it).', 'info');
+        } else if (!patcher.current()) { const r = await patcherGet({}); if (!r.ok) toast(r.error, 'error'); }
+      } catch (e) { log(`Enshrouded Patcher: ${e.message}`, 'error'); toast(e.message, 'error'); }
+      send('settings', publicSettings()); send('player', playerInfo());
+      if (s.conn) setTimeout(() => syncNow('loader'), 500);
+      return { ok: true };
+    }
+    case 'patcherOptions': {
+      if (!patcher.current()) return { ok: false, error: 'Enshrouded Patcher is not downloaded yet.' };
+      try {
+        if (!game.game) game = await findGame();
+        const defaults = await patcher.defaults(game.game || null);
+        return { ok: true, defaults, options: s?.patcherOptions || {}, tool: patcher.current() };
+      } catch (e) { return { ok: false, error: e.message }; }
+    }
+    case 'patcherSave': {
+      if (!s || !isAdmin()) return { ok: false, error: 'Only the admin sets the options.' };
+      const o = arg && typeof arg === 'object' && !Array.isArray(arg) ? { ...arg } : {};
+      delete o.gameDirectory;
+      s.patcherOptions = o; saveSettings(); send('settings', publicSettings());
+      if (usesPatcher(s) && s.conn) setTimeout(() => syncNow('patcher options'), 300);
+      return { ok: true };
+    }
+    case 'patcherPatchServer': {
+      if (!usesPatcher(s) || !s.conn) return { ok: false, error: 'The server does not use Enshrouded Patcher.' };
+      if (s.patcherServer) { s.patcherServer.options = null; saveSettings(); }
+      syncNow('manual');
+      return { ok: true };
     }
     case 'checkAppUpdate': await checkAppUpdate(); return { ok: true, update: appUpdate };
   }

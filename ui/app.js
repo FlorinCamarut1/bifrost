@@ -289,6 +289,13 @@ function renderSettingsGame() {
   const g = S.player?.game;
   const exe = S.settings.game?.exe || 'valheim.exe';
   if (g) $('#game-detected').textContent = g.game ? L(`Acum: ${g.game}`, `Now: ${g.game}`) : exe === 'valheim.exe' ? L('Nu l-am găsit prin Steam - scrie aici folderul care conține valheim.exe.', 'Not found through Steam - type the folder that contains valheim.exe here.') : L(`Nu l-am găsit prin Steam - scrie aici folderul care conține ${exe}.`, `Not found through Steam - type the folder that contains ${exe} here.`);
+  // a server in patcher mode: the game's archive is patched (Put back = Steam's Verify integrity)
+  if (g && S.settings.patcher?.on) {
+    $('#btn-restore-loader').disabled = false;
+    $('#loader-state').textContent = g.owner === 'patcher' ? L('Serverul folosește Enshrouded Patcher: arhiva jocului (enshrouded.kfc) e patch-uită cu opțiunile lui. „Restaurează” deschide Verify integrity în Steam, care pune originalul înapoi.', 'The server uses Enshrouded Patcher: the game\'s archive (enshrouded.kfc) is patched with its options. "Restore" opens Verify integrity in Steam, which puts the original back.')
+      : L('Serverul folosește Enshrouded Patcher: la JOACĂ, Bifrost patch-uiește arhiva jocului cu opțiunile serverului.', 'The server uses Enshrouded Patcher: at PLAY Bifrost patches the game\'s archive with the server\'s options.');
+    return;
+  }
   if (g && S.settings.game?.loader === 'eml') {
     // Enshrouded: EML (dbghelp.dll) + the mods folder linked to the server's profile
     $('#btn-restore-loader').disabled = !g.game || g.owner !== 'bifrost';
@@ -341,6 +348,7 @@ function renderSettings() {
   $('#btn-server-env').hidden = !(s.isAdmin && (s.dockerServer || s.ensSettings));
   $$('[data-act="restart"]').forEach(b => { b.hidden = !s.canRestart; });
   renderServers();
+  renderPatcher();
   document.body.classList.toggle('role-admin', !!s.isAdmin); document.body.classList.toggle('role-player', !s.isAdmin);
   $('#brand-sub').textContent = s.server?.name || gameName();
   renderGame();
@@ -638,6 +646,9 @@ function buildNexusCats() {
 }
 function nxButton(m, big) {
   const cls = big ? 'btn' : 'btn small', nx = S.nx;
+  // Enshrouded Patcher is not an EML mod: it is the server's patcher mode (Settings → Mods or patcher)
+  if (+m.modId === 91) return S.settings.patcher?.on ? `<button class="${cls} installed" disabled>✓ ${L('Patcher activ', 'Patcher on')}</button>`
+    : S.settings.isAdmin ? `<button class="${cls} primary" data-patcher-adopt>${L('Folosește ca patcher', 'Use as patcher')}</button>` : `<button class="${cls}" disabled title="${esc(L('Îl pornește adminul serverului', 'The server admin turns it on'))}">${L('Doar prin server', 'Through the server only')}</button>`;
   if (nx.installed[m.modId]) return `<button class="${cls} installed" disabled>✓ Instalat</button>`;
   const tsTwin = crossInstalled(m.name, m.author || m.uploader?.name, 'thunderstore');
   if (tsTwin) return crossLabel(tsTwin, 'Thunderstore').replace('btn small', cls);
@@ -668,6 +679,7 @@ async function nxInstall(modId, fileId) {
 }
 $('#br-grid').addEventListener('click', e => {
   const b = e.target.closest('[data-nxinstall]'); if (b) { e.stopPropagation(); nxInstall(b.dataset.nxinstall); return; }
+  if (e.target.closest('[data-patcher-adopt]')) { e.stopPropagation(); const sel = $('#sel-loader'); sel.value = 'patcher'; sel.dispatchEvent(new Event('change')); return; }
   const c = e.target.closest('[data-nxpk]'); if (c) openNexusDrawer(+c.dataset.nxpk);
 }, true);
 async function openNexusDrawer(modId, keepScroll) {
@@ -725,6 +737,7 @@ $('#br-grid').addEventListener('click', e => {
 async function closeDrawer() {
   if (S.drawer === 'ens:' && ensChanged() && !await confirmBox(L('Renunți la modificări?', 'Discard the changes?'), L('Ai setări de server nesalvate.', 'There are unsaved server settings.'), L('Renunță la ele', 'Discard them'))) return;
   if (S.drawer === 'env:' && envDirty() && !await confirmBox(L('Renunți la modificări?', 'Discard the changes?'), L('Ai setări de server nesalvate.', 'There are unsaved server settings.'), L('Renunță la ele', 'Discard them'))) return;
+  if (S.drawer === 'patcher:' && PAT.edit && JSON.stringify(PAT.edit) !== PAT.saved && !await confirmBox(L('Renunți la modificări?', 'Discard the changes?'), L('Ai opțiuni nesalvate pentru patcher.', 'There are unsaved patcher options.'), L('Renunță la ele', 'Discard them'))) return;
   if (String(S.drawer).startsWith('cfg:') && cfgDirty() && !await confirmBox('Renunți la modificări?', 'Ai modificări nesalvate în configurare.', 'Renunță la ele')) return;
   S.drawer = null; $('#drawer').hidden = true; $('#drawer-bg').hidden = true;
 }
@@ -1251,6 +1264,7 @@ function renderPlayer() {
   else if (!m) { ring.className = 'ring busy'; $('#pl-mods-title').textContent = P.error ? 'Nu am putut lua lista serverului' : 'Iau lista serverului...'; $('#pl-mods-sub').textContent = P.error || ''; }
   else if (need) { ring.className = 'ring wait'; $('#pl-mods-title').textContent = `${P.plan.install.length} moduri de instalat / actualizat`; $('#pl-mods-sub').textContent = 'Se fac singure când apeși JOACĂ.'; }
   else { ring.className = 'ring ok'; $('#pl-mods-title').textContent = `Toate cele ${P.required} moduri ale serverului sunt instalate`; $('#pl-mods-sub').textContent = `${P.installed} pachete în profil`; }
+  if (S.settings.patcher?.on && !personal) { ring.className = need ? 'ring wait' : 'ring ok'; $('#pl-mods-title').textContent = L('Server cu Enshrouded Patcher', 'Enshrouded Patcher server'); $('#pl-mods-sub').textContent = L('Jocul se patch-uiește la JOACĂ cu opțiunile serverului.', 'The game is patched at PLAY with the server\'s options.'); }
   const plan = $('#pl-plan');
   plan.hidden = !need || !!S.job;
   if (P.plan) plan.textContent = [...P.plan.install.slice(0, 12).map(x => `${x.have ? '↑' : '+'} ${x.title || x.key} ${x.have ? `${x.have} → ` : ''}${x.ver}`),
@@ -1555,6 +1569,119 @@ function renderAppUpdate() {
   const dl = $('#btn-app-dl'); if (dl) dl.onclick = () => window.vp.act('open', u.page);
   const b = $('#btn-app-update'); if (b) b.onclick = () => window.vp.installUpdate();
 }
+
+// ---------- Enshrouded Patcher (main.js patcherInfo / lib/patcher.js): an Enshrouded server's option instead of EML ----------
+function renderPatcher() {
+  const p = S.settings.patcher, card = $('#patcher-card');
+  const sel = $('#sel-loader'); if (sel && document.activeElement !== sel) sel.value = p?.on ? 'patcher' : 'eml';
+  card.hidden = !p?.on;
+  if (!p?.on) return;
+  const pill = $('#patcher-pill'), t = p.tool;
+  pill.className = `status-pill ${!t ? 'warn' : p.server?.upToDate ? 'ok' : p.server ? 'warn' : ''}`;
+  $('#patcher-pill-text').textContent = p.pending ? L('aștept click pe Nexus', 'waiting for the Nexus click') : !t ? L('nedescărcat', 'not downloaded')
+    : p.server?.upToDate ? L(`server patch-uit · v${t.version || t.fileId}`, `server patched · v${t.version || t.fileId}`) : p.server ? L('opțiuni noi - urmează patch', 'new options - patch pending') : L('serverul nu e patch-uit', 'server not patched');
+  $('#patcher-sub').textContent = !t
+    ? L('Patcher-ul vine de pe Nexus Mods (mod 91): Descarcă, apoi alege opțiunile. Serverul se patch-uiește prin PC-ul tău, iar jocul prietenilor la JOACĂ.', 'The patcher comes from Nexus Mods (mod 91): Download, then pick the options. The server is patched through your PC, friends\' games at PLAY.')
+    : L(`${p.options ? `${p.options} grupuri de opțiuni alese` : 'Opțiunile implicite ale patcher-ului'}. La salvare, Bifrost patch-uiește arhiva serverului (enshrouded_server.kfc) prin PC-ul tău, o urcă înapoi (originalul rămâne ca .bifrost-orig) și repornește serverul când e gol. Prietenii primesc opțiunile prin listă și jocul lor se patch-uiește la JOACĂ.`,
+      `${p.options ? `${p.options} option groups set` : 'The patcher\'s default options'}. On save Bifrost patches the server's archive (enshrouded_server.kfc) through your PC, uploads it back (the original stays as .bifrost-orig) and restarts the server when it is empty. Friends get the options through the list and their game is patched at PLAY.`);
+  $('#btn-patcher-get').hidden = !!t && !p.pending;
+  $('#btn-patcher-get').textContent = p.pending ? L('Deschide pagina Nexus', 'Open the Nexus page') : L('Descarcă patcher-ul', 'Download the patcher');
+  $('#btn-patcher-opts').disabled = !t; $('#btn-patcher-patch').disabled = !t || !!S.job;
+}
+$('#sel-loader').addEventListener('change', async e => {
+  const to = e.target.value;
+  const ok = await confirmBox(to === 'patcher' ? L('Treci pe Enshrouded Patcher?', 'Switch to Enshrouded Patcher?') : L('Înapoi la EML?', 'Back to EML?'),
+    to === 'patcher' ? L('EML și modurile lui se scot de pe server și din jocul tău (rămân în profil, revin dacă te întorci). Bifrost descarcă patcher-ul de pe Nexus, patch-uiește serverul prin PC-ul tău și jocul prietenilor la JOACĂ.', 'EML and its mods come off the server and your game (they stay in the profile and come back if you switch back). Bifrost downloads the patcher from Nexus, patches the server through your PC and friends\' games at PLAY.')
+      : L('Serverul primește înapoi arhiva originală și EML. Jocul de pe PC-uri rămâne patch-uit până la „Verify integrity of game files” în Steam.', 'The server gets its original archive and EML back. The games on PCs stay patched until "Verify integrity of game files" in Steam.'),
+    L('Da, schimbă', 'Yes, switch'));
+  if (!ok) { renderPatcher(); return; }
+  const r = await window.vp.act('patcherMode', to);
+  if (!r.ok) toast(r.error, 'error');
+});
+$('#btn-patcher-get').onclick = async () => {
+  const r = await window.vp.act('patcherGet');
+  toast(!r.ok ? r.error : r.waiting ? L('Pe pagina Nexus care s-a deschis apasă „Slow download” - Bifrost îl ia singur.', 'On the Nexus page that opened press "Slow download" - Bifrost takes it from there.') : L('Enshrouded Patcher e gata.', 'Enshrouded Patcher is ready.'), r.ok ? 'ok' : 'error');
+};
+$('#btn-patcher-patch').onclick = async () => { const r = await window.vp.act('patcherPatchServer'); if (!r.ok) toast(r.error, 'error'); else toast(L('Patch-uiesc serverul - vezi Jurnalul.', 'Patching the server - see the Log.')); };
+$('#btn-patcher-opts').onclick = () => openPatcherOptions();
+
+// the options drawer: a form built from the patcher's own config.json (every option it has, with its defaults)
+const PAT = { defaults: null, edit: null, saved: null, raw: false };
+const patLabel = k => String(k).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase());
+async function openPatcherOptions() {
+  S.drawer = 'patcher:';
+  $('#drawer').hidden = false; $('#drawer-bg').hidden = false; $('#drawer').scrollTop = 0;
+  $('#drawer-body').innerHTML = `<div class="empty">${L('pornesc patcher-ul ca să-i citesc opțiunile...', 'starting the patcher to read its options...')}</div>`;
+  const r = await window.vp.act('patcherOptions');
+  if (S.drawer !== 'patcher:') return;
+  if (!r.ok) { $('#drawer-body').innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
+  const merged = patMerge(r.defaults || {}, r.options || {});
+  Object.assign(PAT, { defaults: r.defaults || {}, edit: merged, saved: JSON.stringify(merged), raw: false, tool: r.tool });
+  renderPatcherOptions();
+}
+function patMerge(a, b) {
+  if (!a || typeof a !== 'object' || Array.isArray(a) || !b || typeof b !== 'object' || Array.isArray(b)) return b === undefined ? a : b;
+  const o = { ...a }; for (const [k, v] of Object.entries(b)) o[k] = patMerge(a[k], v); return o;
+}
+const patGet = (o, p) => p.split('.').reduce((x, k) => x?.[k], o);
+function patSet(o, p, v) { const ks = p.split('.'); let x = o; for (const k of ks.slice(0, -1)) x = x[k] ??= {}; x[ks[ks.length - 1]] = v; }
+// one value: a switch for true/false, a number box, a text box
+function patCtl(p, v) {
+  if (typeof v === 'boolean') return `<label class="switch"><input type="checkbox" data-pat="${esc(p)}" data-t="bool" ${v ? 'checked' : ''}><span></span></label>`;
+  if (typeof v === 'number') return `<input class="txt num-in" data-pat="${esc(p)}" data-t="number" inputmode="decimal" value="${esc(String(v))}">`;
+  return `<input class="txt" data-pat="${esc(p)}" data-t="text" value="${esc(v ?? '')}" spellcheck="false">`;
+}
+function patRows(obj, base, depth = 0) {
+  return Object.entries(obj).map(([k, v]) => {
+    const p = base ? `${base}.${k}` : k;
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const leaves = Object.entries(v).filter(([, x]) => !(x && typeof x === 'object'));
+      const subs = Object.entries(v).filter(([, x]) => x && typeof x === 'object' && !Array.isArray(x));
+      // an option: { enabled, value / factor / cap ... } -> one row, the switch first
+      if ('enabled' in v || (leaves.length && !subs.length && depth > 0)) {
+        const fields = leaves.filter(([n]) => n !== 'enabled').map(([n, x]) => `<span class="pat-f"><small>${esc(n)}</small>${patCtl(`${p}.${n}`, x)}</span>`).join('');
+        return `<div class="cfg-row ${'enabled' in v && !v.enabled ? 'pat-off' : ''}"><div class="cfg-l"><b>${esc(patLabel(k))}</b>${fields ? `<div class="pat-fields">${fields}</div>` : ''}</div><div class="cfg-c">${'enabled' in v ? patCtl(`${p}.enabled`, v.enabled) : ''}</div></div>${subs.length ? patRows(Object.fromEntries(subs), p, depth + 1) : ''}`;
+      }
+      return `<details class="cfg-sec" ${depth ? '' : 'open'}><summary>${esc(patLabel(k))} <span class="muted">${Object.keys(v).length}</span></summary>${patRows(v, p, depth + 1)}</details>`;
+    }
+    if (Array.isArray(v)) return '';
+    return `<div class="cfg-row"><div class="cfg-l"><b>${esc(patLabel(k))}</b></div><div class="cfg-c">${patCtl(p, v)}</div></div>`;
+  }).join('');
+}
+function renderPatcherOptions() {
+  const dirty = JSON.stringify(PAT.edit) !== PAT.saved;
+  $('#drawer-body').innerHTML = `
+    <div class="cfg-head"><h2>Enshrouded Patcher</h2><div class="muted small">${esc(L(`v${PAT.tool?.version || PAT.tool?.fileId || '?'} · aceleași opțiuni pe server și la toți prietenii`, `v${PAT.tool?.version || PAT.tool?.fileId || '?'} · the same options on the server and for every friend`))}</div></div>
+    <div class="cfg-tools"><div class="seg" id="pat-mode"><button class="${PAT.raw ? '' : 'on server'}" data-pm="form">${L('Formular', 'Form')}</button><button class="${PAT.raw ? 'on server' : ''}" data-pm="json">JSON</button></div>
+      <button class="btn small ghost" id="pat-defaults">${L('Valorile patcher-ului', 'The patcher\'s defaults')}</button></div>
+    ${PAT.raw ? `<textarea class="cfg-raw" id="pat-raw" spellcheck="false">${esc(JSON.stringify(PAT.edit, null, 2))}</textarea>` : `<div id="pat-form">${patRows(PAT.edit, '')}</div>`}
+    <div class="cfg-bar"><span>${dirty ? L('Modificări nesalvate', 'Unsaved changes') : L('Salvat', 'Saved')}</span>
+      <div class="row gap"><button class="btn ghost" id="pat-cancel">${L('Închide', 'Close')}</button><button class="btn primary" id="pat-save" ${dirty || PAT.raw ? '' : 'disabled'}>${L('Salvează și patch-uiește', 'Save and patch')}</button></div></div>`;
+}
+$('#drawer-body').addEventListener('change', e => {
+  if (S.drawer !== 'patcher:') return;
+  const i = e.target.closest('[data-pat]'); if (!i) return;
+  const v = i.dataset.t === 'bool' ? i.checked : i.dataset.t === 'number' ? (i.value.trim() === '' || isNaN(+i.value) ? patGet(PAT.edit, i.dataset.pat) : +i.value) : i.value;
+  patSet(PAT.edit, i.dataset.pat, v);
+  const top = $('#drawer').scrollTop; renderPatcherOptions(); $('#drawer').scrollTop = top;
+});
+$('#drawer-body').addEventListener('click', async e => {
+  if (S.drawer !== 'patcher:') return;
+  const m = e.target.closest('[data-pm]');
+  if (m) {
+    if (PAT.raw && m.dataset.pm === 'form') { try { PAT.edit = JSON.parse($('#pat-raw').value); } catch (err) { toast(L(`JSON invalid: ${err.message}`, `Invalid JSON: ${err.message}`), 'error'); return; } }
+    PAT.raw = m.dataset.pm === 'json'; renderPatcherOptions(); return;
+  }
+  if (e.target.closest('#pat-defaults')) { PAT.edit = JSON.parse(JSON.stringify(PAT.defaults)); renderPatcherOptions(); return; }
+  if (e.target.closest('#pat-cancel')) { closeDrawer(); return; }
+  if (e.target.closest('#pat-save')) {
+    if (PAT.raw) { try { PAT.edit = JSON.parse($('#pat-raw').value); } catch (err) { toast(L(`JSON invalid: ${err.message}`, `Invalid JSON: ${err.message}`), 'error'); return; } }
+    const r = await window.vp.act('patcherSave', PAT.edit);
+    if (!r.ok) { toast(r.error, 'error'); return; }
+    PAT.saved = JSON.stringify(PAT.edit); renderPatcherOptions();
+    toast(L('Opțiuni salvate - patch-uiesc serverul (vezi Jurnalul); prietenii le primesc la următorul JOACĂ.', 'Options saved - patching the server (see the Log); friends get them at their next PLAY.'), 'ok');
+  }
+});
 
 // ---------- language: the UI is written in Romanian; English (the default) is applied to whatever reaches the screen ----------
 let i18nObs = null;
