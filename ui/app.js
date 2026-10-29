@@ -1631,18 +1631,31 @@ function patCtl(p, v) {
   if (typeof v === 'number') return `<input class="txt num-in" data-pat="${esc(p)}" data-t="number" inputmode="decimal" value="${esc(String(v))}">`;
   return `<input class="txt" data-pat="${esc(p)}" data-t="text" value="${esc(v ?? '')}" spellcheck="false">`;
 }
+// the patcher's own bookkeeping, not options (gameDirectory is Bifrost's to set)
+const PAT_HIDDEN = new Set(['gameDirectory', 'outputDirectory', 'kfcParserVersion']);
+// options whose factor scales a time or a cost: lower is faster / cheaper (a crafting factor of 10 made crafting 10x slower)
+const PAT_LOWER = new Set(['enableAdjustCraftingTime', 'adjustManaCost', 'adjustSpellCastTime', 'adjustBowChargeTime', 'adjustMusicTime']);
+function patHint(k, desc) {
+  const lower = PAT_LOWER.has(k) ? L('Mai mic = mai rapid / mai ieftin: 0.1 = de 10× mai rapid, 1 = normal, 10 = de 10× mai lent.', 'Lower = faster / cheaper: 0.1 = 10× faster, 1 = normal, 10 = 10× slower.') : '';
+  return [desc, lower].filter(Boolean).map(t => `<small>${esc(t)}</small>`).join('');
+}
 function patRows(obj, base, depth = 0) {
   return Object.entries(obj).map(([k, v]) => {
     const p = base ? `${base}.${k}` : k;
+    if (!base && PAT_HIDDEN.has(k)) return '';
     if (v && typeof v === 'object' && !Array.isArray(v)) {
-      const leaves = Object.entries(v).filter(([, x]) => !(x && typeof x === 'object'));
+      // (every option carries the patcher's own description: shown as text, never edited)
+      const desc = typeof v.description === 'string' ? v.description : '';
+      const leaves = Object.entries(v).filter(([n, x]) => n !== 'description' && !(x && typeof x === 'object'));
       const subs = Object.entries(v).filter(([, x]) => x && typeof x === 'object' && !Array.isArray(x));
       // an option: { enabled, value / factor / cap ... } -> one row, the switch first
       if ('enabled' in v || (leaves.length && !subs.length && depth > 0)) {
         const fields = leaves.filter(([n]) => n !== 'enabled').map(([n, x]) => `<span class="pat-f"><small>${esc(n)}</small>${patCtl(`${p}.${n}`, x)}</span>`).join('');
-        return `<div class="cfg-row ${'enabled' in v && !v.enabled ? 'pat-off' : ''}"><div class="cfg-l"><b>${esc(patLabel(k))}</b>${fields ? `<div class="pat-fields">${fields}</div>` : ''}</div><div class="cfg-c">${'enabled' in v ? patCtl(`${p}.enabled`, v.enabled) : ''}</div></div>${subs.length ? patRows(Object.fromEntries(subs), p, depth + 1) : ''}`;
+        return `<div class="cfg-row ${'enabled' in v && !v.enabled ? 'pat-off' : ''}"><div class="cfg-l"><b>${esc(patLabel(k))}</b>${patHint(k, desc)}${fields ? `<div class="pat-fields">${fields}</div>` : ''}</div><div class="cfg-c">${'enabled' in v ? patCtl(`${p}.enabled`, v.enabled) : ''}</div></div>${subs.length ? patRows(Object.fromEntries(subs), p, depth + 1) : ''}`;
       }
-      return `<details class="cfg-sec" ${depth ? '' : 'open'}><summary>${esc(patLabel(k))} <span class="muted">${Object.keys(v).length}</span></summary>${patRows(v, p, depth + 1)}</details>`;
+      // a group of options (player, gameplay...) or an option made of parts (adjustSpellDuration: totem, entangle...)
+      const parts = Object.fromEntries(Object.entries(v).filter(([n]) => n !== 'description'));
+      return `<details class="cfg-sec" ${depth ? '' : 'open'}><summary>${esc(patLabel(k))} <span class="muted">${Object.keys(parts).length}</span></summary>${desc ? `<div class="pat-desc">${patHint(k, desc)}</div>` : ''}${patRows(parts, p, depth + 1)}</details>`;
     }
     if (Array.isArray(v)) return '';
     return `<div class="cfg-row"><div class="cfg-l"><b>${esc(patLabel(k))}</b></div><div class="cfg-c">${patCtl(p, v)}</div></div>`;

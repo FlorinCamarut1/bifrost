@@ -818,3 +818,5 @@ div.setting { cursor: default; }
 .pat-f small { margin: 0; color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
 .pat-f .txt.num-in { width: 104px; height: 30px; }
 .cfg-row.pat-off .pat-fields { opacity: .5; }
+.cfg-l .pat-desc, .cfg-sec > .pat-desc { padding: 0 12px 8px; }
+.cfg-l > small + small { margin-top: 2px; color: var(--warn, #f5b041); }
