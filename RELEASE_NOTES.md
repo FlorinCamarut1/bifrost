@@ -1,4 +1,8 @@
-﻿## Bifrost 2.5.1
+﻿## Bifrost 2.5.2
+
+- **Enshrouded Patcher on the server:** the patch stopped at Unpack. kfc-parser (which the patcher uses) reads the game's data types out of the server's enshrouded_server.exe, and Bifrost had only put an empty stand-in next to the archive. The server's real exe (22 MB) is now downloaded once, again only after a game update, and is never uploaded back.
+
+## Bifrost 2.5.1
 
 - **Enshrouded Patcher on the server:** every patch failed with "the patcher finished but enshrouded_server.kfc did not change". The patcher only accepts a folder that has the game's exe in it, and the folder Bifrost patches the server's archive in had only the archive. It now passes the check.
 - When the patcher stops, the error says the step that failed, from the patcher's own log.
