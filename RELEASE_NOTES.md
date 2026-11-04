@@ -1,4 +1,11 @@
-﻿## Bifrost 2.6.2
+﻿## Bifrost 2.6.3
+
+- **The in-game XHL settings (F10) are in Bifrost too.** The ⚙ button next to an XHL mod also opens "F10 · world rules (server)" and "F10 · yours (PC)", next to its config.txt.
+- **World rules are kept on the server**, the same for every player, for example XHL-Vein-Mining's list of materials that chain-mine. A mod's config.txt only gives a new world its first values, so editing materialIds there did nothing on an existing world. Bifrost writes the world's rules when the server restarts, while it is stopped, because the server rewrites the file while it runs. Only the values you changed are written.
+- Vein Mining's material list is shown as a list of ids (1-127). In game, hold the ` key while aiming at a block to see its id.
+- Your own F10 settings are saved on this PC when the game is closed. While it runs, change them in game.
+
+## Bifrost 2.6.2
 
 - **Enshrouded mods have settings in Bifrost.** The ⚙ button next to an Enshrouded mod opens its config.txt (XHL-Max-Stack: maxStackSize, XHL-Workshop-Speed: multiplier, ...) as a settings form, with the mod's own comments as descriptions. Saving sends the mod to the server; it applies when the server restarts.
 - Settings you changed stay when the mod is updated, and go away with the mod when it is uninstalled.

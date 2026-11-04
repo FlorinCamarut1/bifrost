@@ -39,6 +39,7 @@ const { makeTransport, walk, normSha } = require('./lib/transport');
 const { syncMods } = require('./lib/modsync');
 const { syncConfigs, SKIP: CFG_SKIP, safeRel } = require('./lib/serversync');
 const bepcfg = require('./lib/bepcfg');
+const xhlcfg = require('./lib/xhlcfg');
 const sharedcfg = require('./lib/sharedcfg');
 const serverenv = require('./lib/serverenv');
 const enssettings = require('./lib/enssettings');
@@ -1065,7 +1066,12 @@ function adminMods() {
 }
 const modsPayload = () => {
   const p = !srv() ? { mods: [], profileFound: false } : isAdmin() ? adminMods() : playerMods();
-  if (srv() && isAdmin()) { const c = configCounts(); for (const m of p.mods) m.configs = c[m.name] || 0; p.otherConfigs = c[''] || 0; }
+  if (srv() && isAdmin()) {
+    const c = configCounts();
+    // (+ XHL's in-game settings: the player's file when there is one, the world's on the server)
+    for (const m of p.mods) { const xm = xhlModules(m.name); m.configs = (c[m.name] || 0) + xm.filter(x => { const f = xhlPlayerFile(x); return f && fs.existsSync(f); }).length + (xhlCanWorld() ? xm.length : 0); }
+    p.otherConfigs = c[''] || 0;
+  }
   return p;
 };
 function setSide(name, side) {
@@ -1286,8 +1292,10 @@ async function restartServer({ fast, recreate } = {}) {
       try { quick = await tr.reloadModsAndRestartGame(); } catch (e) { log(`  quick restart not possible (${e.message}) - restarting the container`, 'out'); }
       if (quick) log('  mods copied into the game, only the game process restarts', 'out');
     }
-    if (!quick) await tr.restart();
+    let xw = [];
+    if (!quick) { try { xw = await xhlWorldWhileStopped(tr); } catch (e) { log(`  the world's XHL settings: ${e.message}`, 'error'); } await tr.restart(); }
     clearPending(sent);   // the game started with them
+    xhlClearPending(xw);
     const st = readState(); st.restartPending = false; writeState(st);
     if (!tr.valheimImage) { log('■ Server restarted', 'done'); return { ok: true }; }
     // the valheim-server image: wait for an active join code; its join-code check sometimes crashes
@@ -1494,6 +1502,96 @@ const cfgPath = rel => {
   return path.join(configDir(), ...rel.split('/'));
 };
 const sha1 = t => crypto.createHash('sha1').update(t).digest('hex');
+
+// ---------- XHL-Core's in-game settings (Enshrouded: F10 → XHL Mod Settings) - see lib/xhlcfg.js ----------
+// in the editor as more files of the mod: 'xhl-world:<world id>/<module>' (the world's rules, on the server; F10 does
+// not offer all of them) and 'xhl-player:<module>' (the player's own, in the game folder)
+const XHL_W = 'xhl-world:', XHL_P = 'xhl-player:';
+const isXhl = rel => typeof rel === 'string' && (rel.startsWith(XHL_W) || rel.startsWith(XHL_P));
+const xhlModule = m => typeof m === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(m) && !m.includes('..');
+const xhlWorldKey = k => { const [w, m, x] = String(k).split('/'); return x === undefined && /^[0-9a-f]{8,64}$/i.test(w || '') && xhlModule(m) ? { w, m } : null; };
+const xhlModules = key => { const p = getProfile().packages[key]; return gdef().loader === 'eml' && p ? (p.emlIds || []).filter(xhlModule) : []; };
+const xhlPlayerFile = m => game.game ? path.join(game.game, 'XHL', 'config', `${m}.json`) : null;
+const xhlPendingFile = () => path.join(serverDir(srv().id), 'xhl-world-pending.json');
+const xhlCanWorld = () => isAdmin() && !!srv()?.conn && !!transport()?.serverDir;
+const Lm = (ro, en) => ((G.lang || 'en') === 'en' ? en : ro);
+// the newest world's file of each module on the server: [{ w, m }]
+async function xhlWorldFiles(modules) {
+  if (!modules.length || !xhlCanWorld()) return [];
+  const tr = transport();
+  const out = await tr.run(`cd ${shq(`${tr.serverDir}/XHL/worlds`)} 2>/dev/null && ls -1t */*.json 2>/dev/null; true`, { timeout: 20000 }).catch(() => '');
+  const seen = new Set(), res = [];
+  for (const l of String(out).split('\n')) {
+    const k = xhlWorldKey(l.trim().replace(/\.json$/, ''));
+    if (k && modules.includes(k.m) && !seen.has(k.m)) { seen.add(k.m); res.push(k); }
+  }
+  return res;
+}
+async function xhlRead(rel) {
+  if (rel.startsWith(XHL_P)) {
+    const m = rel.slice(XHL_P.length), f = xhlModule(m) && xhlPlayerFile(m);
+    if (!f) throw new Error(Lm('Nu știu unde e folderul jocului - alege-l în Setări.', 'The game folder is not known - choose it in Settings.'));
+    return { kind: 'player', m, text: fs.readFileSync(f, 'utf8'), file: f };
+  }
+  const k = xhlWorldKey(rel.slice(XHL_W.length));
+  if (!k || !xhlCanWorld()) throw new Error('Fișier de config invalid.');
+  const tr = transport(), base = String(await tr.read(tr.serverDir, `XHL/worlds/${k.w}/${k.m}.json`));
+  const pend = readJson(xhlPendingFile(), {})[`${k.w}/${k.m}`];
+  return { kind: 'world', ...k, base, pending: !!pend, text: pend ? xhlcfg.merge(base, pend.values) : base };
+}
+async function xhlSave({ rel, changes, text, expect }) {
+  const f = await xhlRead(rel), cur = f.text;
+  if (expect && sha1(cur) !== expect) throw new Error(Lm('Fișierul s-a schimbat între timp - l-am reîncărcat, fă modificarea din nou.', 'The file changed meanwhile - it was reloaded, make the change again.'));
+  let next;
+  if (typeof text === 'string') { xhlcfg.parse(text); next = text; } else next = xhlcfg.apply(cur, changes || []);
+  if (next === cur) return { ok: true, unchanged: true };
+  const what = Object.keys(xhlcfg.diff(cur, next)).join(', ');
+  if (f.kind === 'player') {
+    // (the game keeps them in memory and writes them back: an edit made while it runs is lost)
+    if (await checkGameProcess().catch(() => false)) throw new Error(Lm(`${gdef().name} e pornit: schimbă-le din joc (F10), sau închide jocul și salvează din nou.`, `${gdef().name} is running: change them in game (F10), or close the game and save again.`));
+    fs.writeFileSync(f.file + '.tmp', next); fs.renameSync(f.file + '.tmp', f.file);
+    log(`XHL settings edited (yours, ${f.m}): ${what}`, 'done');
+    return { ok: true, pushed: false, local: true, hash: sha1(next) };
+  }
+  // the world's: written while the server is stopped, at its next restart (it saves its own copy when it closes)
+  const pd = readJson(xhlPendingFile(), {}), key = `${f.w}/${f.m}`, values = xhlcfg.diff(f.base, next);
+  if (Object.keys(values).length) pd[key] = { values, at: Date.now() }; else delete pd[key];
+  writeJson(xhlPendingFile(), pd);
+  if (pd[key]) { const st = readState(); st.restartPending = true; writeState(st); }
+  log(`XHL world rules edited (${f.m}): ${what} - written on the server at its next restart`, 'done');
+  return { ok: true, pushed: false, waitRestart: !!pd[key], canRestart: !!transport()?.canRestart, hash: sha1(next) };
+}
+// in restartServer, before the start: stop the server, write the world files it would otherwise overwrite as it closes.
+// Returns the keys written, to clear once it has started with them.
+async function xhlWorldWhileStopped(tr) {
+  if (!srv() || gdef().loader !== 'eml' || !isAdmin() || !tr?.serverDir) return [];
+  const pd = readJson(xhlPendingFile(), {}), keys = Object.keys(pd).filter(xhlWorldKey);
+  if (!keys.length) return [];
+  let read = async rel => String(await tr.read(tr.serverDir, rel));
+  let write = (rel, text) => tr.put(tr.serverDir, [{ name: rel, data: Buffer.from(text) }]);
+  if (tr.docker) {
+    // a stopped container takes no docker exec: the files through its volume, on the host
+    const m = (await tr.mounts()).filter(x => tr.serverDir === x.dst || tr.serverDir.startsWith(x.dst + '/')).sort((a, b) => b.dst.length - a.dst.length)[0];
+    if (!m) { log(`  the world's XHL settings are not written: ${tr.serverDir} is not on one of the container's volumes`, 'error'); return []; }
+    const host = m.src + tr.serverDir.slice(m.dst.length);
+    read = rel => tr.ssh(`cat ${shq(`${host}/${rel}`)}`);
+    // (cat into the file keeps its owner and permissions)
+    write = (rel, text) => tr.ssh(`f=${shq(`${host}/${rel}`)}; [ -f "$f" ] || exit 1; cp -p "$f" "$f.bifrost-bak"; cat > "$f"`, { input: text });
+    log("  stopping the server first (it writes its own copy of the world's XHL settings when it closes)", 'out');
+    await tr.ssh(`docker stop ${shq(tr.conn.container)}`, { timeout: 180000 });
+  }
+  const done = [];
+  for (const k of keys) {
+    const rel = `XHL/worlds/${k}.json`;
+    try { await write(rel, xhlcfg.merge(await read(rel), pd[k].values)); done.push(k); log(`  XHL world rules written: ${k} (${Object.keys(pd[k].values).join(', ')})`, 'out'); }
+    catch (e) { log(`  could not write ${rel}: ${e.message}`, 'error'); }
+  }
+  return done;
+}
+function xhlClearPending(keys) {
+  if (!keys.length) return;
+  const pd = readJson(xhlPendingFile(), {}); for (const k of keys) delete pd[k]; writeJson(xhlPendingFile(), pd);
+}
 // config files of a removed mod: gone from the server first, then from the profile (the other way round the two-way
 // sync would bring them back), and from the sync's memory
 async function deleteConfigs(rels) {
@@ -2281,6 +2379,13 @@ async function action(name, arg) {
         let size = 0; try { size = fs.statSync(cfgPath(rel)).size; } catch { }
         return { rel, size, kind: /\.cfg$/i.test(rel) ? 'cfg' : 'text' };
       });
+      // XHL mods: the in-game (F10) settings first - the world's rules, then the player's own
+      const xm = xhlModules(arg || '');
+      if (xm.length) {
+        const world = (await xhlWorldFiles(xm)).map(k => ({ rel: `${XHL_W}${k.w}/${k.m}`, kind: 'xhl', label: Lm('F10 · regulile lumii (server)', 'F10 · world rules (server)') }));
+        const mine = xm.filter(x => { const f = xhlPlayerFile(x); return f && fs.existsSync(f); }).map(x => ({ rel: `${XHL_P}${x}`, kind: 'xhl', label: Lm('F10 · ale tale (PC)', 'F10 · yours (PC)') }));
+        files.unshift(...world, ...mine);
+      }
       // (EML games: the mod sync sends them, not the config sync)
       return { ok: true, files, server: isAdmin() && !!srv().conn && (gdef().loader === 'eml' || !!srv().syncConfigs), side: readState().mods[arg] || null, game: gdef().id };
     }
@@ -2295,6 +2400,10 @@ async function action(name, arg) {
       return { ok: true, shared: s.sharedConfigs };
     }
     case 'readConfig': try {
+      if (isXhl(arg)) {
+        const f = await xhlRead(arg);
+        return { ok: true, text: f.text, hash: sha1(f.text), parsed: xhlcfg.parse(f.text, G.lang || 'en'), xhl: f.kind, pending: !!f.pending };
+      }
       const p = cfgPath(arg);
       if (fs.statSync(p).size > 4 * 1024 * 1024) return { ok: false, error: 'Fișierul e prea mare pentru editor (peste 4 MB).' };
       const text = fs.readFileSync(p, 'utf8');
@@ -2308,7 +2417,7 @@ async function action(name, arg) {
     case 'ensSave': try { return await ensSave(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
     case 'ensApply': return ensApply();
     case 'deleteConfigs': try { return await deleteConfigs(arg); } catch (e) { return { ok: false, error: e.message }; }
-    case 'saveConfig': try { return await saveConfig(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
+    case 'saveConfig': try { return isXhl(arg?.rel) ? await xhlSave(arg) : await saveConfig(arg || {}); } catch (e) { return { ok: false, error: e.message }; }
     case 'restartIdle': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, what: 'new configs' }); } catch (e) { return { ok: false, error: e.message }; }
     case 'restart': try { const st = readState(); st.restartPending = true; writeState(st); return await maybeRestart({ manual: true, force: true }); } catch (e) { return { ok: false, error: e.message }; }
     case 'fixcode': try {

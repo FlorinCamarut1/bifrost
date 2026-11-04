@@ -810,15 +810,17 @@ function cfgRow(si, ei, sec, e) {
 }
 function renderConfig() {
   const f = CFG.file;
-  const dest = !CFG.server ? 'Se salvează în profilul tău.' : CFG.game !== 'valheim'
+  const xl = f?.xhl === 'world' ? L('Regulile lumii, pe server (aceleași pentru toți jucătorii). Bifrost le scrie la repornirea serverului, cât e oprit; config.txt al modului dă valorile doar unei lumi noi, după aceea contează fișierul ăsta.', "The world's rules, on the server (the same for every player). Bifrost writes them when the server restarts, while it is stopped; the mod's config.txt only gives a new world its values, after that this file is what counts.")
+    : f?.xhl === 'player' ? L('Setările tale din F10, pe PC-ul ăsta. Închide jocul înainte să le schimbi de aici.', 'Your own F10 settings, on this PC. Close the game before changing them here.') : null;
+  const dest = xl ? xl : !CFG.server ? 'Se salvează în profilul tău.' : CFG.game !== 'valheim'
     ? L('Se salvează în profil și se trimite pe server odată cu modul; se aplică la repornirea serverului.', 'Saved in the profile and sent to the server with the mod; it applies when the server restarts.')
     : CFG.side === 'client'
     ? 'Mod de client: se salvează în profil (și ajunge pe server odată cu celelalte configurări).'
     : 'Se salvează în profil și se trimite imediat pe server.';
   // a few files: buttons; many (EpicLoot, Seasonality...): a list
   const files = CFG.files.length <= 1 ? ''
-    : CFG.files.length <= 5 ? `<div class="chips cfg-files no-i18n">${CFG.files.map(x => `<button class="chip ${x.rel === CFG.rel ? 'active' : ''}" data-cfg-file="${esc(x.rel)}">${esc(x.rel)}</button>`).join('')}</div>`
-      : `<div class="cfg-files"><select class="select no-i18n" id="cfg-file">${CFG.files.map(x => `<option value="${esc(x.rel)}" ${x.rel === CFG.rel ? 'selected' : ''}>${esc(x.rel)}</option>`).join('')}</select><span class="muted small">${CFG.files.length} fișiere</span></div>`;
+    : CFG.files.length <= 5 ? `<div class="chips cfg-files no-i18n">${CFG.files.map(x => `<button class="chip ${x.rel === CFG.rel ? 'active' : ''}" data-cfg-file="${esc(x.rel)}">${esc(x.label || x.rel)}</button>`).join('')}</div>`
+      : `<div class="cfg-files"><select class="select no-i18n" id="cfg-file">${CFG.files.map(x => `<option value="${esc(x.rel)}" ${x.rel === CFG.rel ? 'selected' : ''}>${esc(x.label || x.rel)}</option>`).join('')}</select><span class="muted small">${CFG.files.length} fișiere</span></div>`;
   let body;
   if (CFG.err) body = `<div class="empty">${esc(CFG.err)}</div>`;
   else if (CFG.raw) body = `<textarea class="cfg-raw no-i18n" id="cfg-raw" spellcheck="false">${esc(CFG.rawText ?? f.text)}</textarea>`;
@@ -828,11 +830,11 @@ function renderConfig() {
       <div class="no-i18n">${sec.entries.map((e, ei) => cfgRow(si, ei, sec, e)).join('')}</div></details>`).join('') || '<div class="empty">Fișierul nu are setări.</div>';
   }
   $('#drawer-body').innerHTML = `
-    <div class="cfg-head"><h2>${esc(CFG.title)}</h2><div class="muted">${f?.parsed?.plugin ? `<span class="no-i18n">${esc(f.parsed.plugin)}</span> · ` : ''}<span>${dest}</span></div></div>
+    <div class="cfg-head"><h2>${esc(CFG.title)}</h2><div class="muted">${f?.parsed?.plugin ? `<span class="no-i18n">${esc(f.parsed.plugin)}</span> · ` : ''}<span>${dest}</span></div>${f?.pending ? `<div class="small">${L('Ce vezi aici așteaptă repornirea serverului: atunci ajunge în lume.', "What you see here waits for the server's restart: then it reaches the world.")}</div>` : ''}</div>
     ${files}
     ${S.settings?.isAdmin && CFG.rel && /\.cfg$/i.test(CFG.rel) && !CFG.err ? `<label class="cfg-share"><div><b>${L('Și prietenii primesc setările din fișierul ăsta', 'Players get the settings of this file too')}</b><small>${L('Ce ai schimbat față de valorile implicite ajunge și în configul lor, la JOACĂ. Pentru setările pe care serverul nu le trimite (de ex. timpul de îmblânzire: îl calculează jocul jucătorului de lângă animal).', 'What you changed from the defaults reaches their config too, on PLAY. For settings the server does not send (e.g. taming time: the game of the player next to the animal works it out).')}</small></div><span class="switch"><input type="checkbox" id="cfg-share" ${(S.settings.server?.sharedConfigs || []).includes(CFG.rel) ? 'checked' : ''}><span></span></span></label>` : ''}
     ${CFG.key === '' && CFG.rel ? `<div class="cfg-orphan"><span class="muted small">${L('Niciun mod instalat nu folosește fișierul ăsta (rămas de la un mod dezinstalat?).', 'No installed mod uses this file (left from an uninstalled mod?).')}</span><div class="row gap"><button class="btn small danger" id="cfg-delete">${L('Șterge fișierul', 'Delete the file')}</button>${CFG.files.length > 1 ? `<button class="btn small danger" id="cfg-delete-all">${L(`Șterge toate (${CFG.files.length})`, `Delete all (${CFG.files.length})`)}</button>` : ''}</div></div>` : ''}
-    <div class="cfg-tools">${f?.parsed && !CFG.raw ? `<input class="txt" id="cfg-q" placeholder="Caută o setare..." value="${esc(CFG.q)}">` : `<span class="muted small no-i18n">${esc(CFG.rel || '')}</span>`}
+    <div class="cfg-tools">${f?.parsed && !CFG.raw ? `<input class="txt" id="cfg-q" placeholder="Caută o setare..." value="${esc(CFG.q)}">` : `<span class="muted small no-i18n">${esc(CFG.files.find(x => x.rel === CFG.rel)?.label || CFG.rel || '')}</span>`}
       ${f?.parsed && !CFG.raw ? `<button class="btn small ghost" id="cfg-defaults" title="${L('Pune toate setările din fișierul ăsta la valorile implicite ale modului. Se aplică după Salvează.', 'Set every setting in this file to its default value. Applied when you press Save.')}">${L('Valori implicite', 'Restore defaults')}</button>` : ''}
       ${f?.parsed ? `<div class="seg" id="cfg-mode"><button class="${CFG.raw ? '' : 'on server'}" data-mode="form">Setări</button><button class="${CFG.raw ? 'on server' : ''}" data-mode="raw">Text</button></div>` : ''}</div>
     <div id="cfg-body">${body}</div>
@@ -881,7 +883,9 @@ async function saveConfig() {
   const r = await window.vp.act('saveConfig', arg);
   CFG.busy = false;
   if (!r.ok) { toast(r.error, 'error'); if (/s-a schimbat|altă versiune/.test(r.error)) await loadConfigFile(CFG.rel, true); else renderConfigBar(); return; }
-  CFG.after = r.pushed
+  CFG.after = r.waitRestart
+    ? `<span>${L('Salvat. Bifrost îl scrie în lume la următoarea repornire a serverului.', "Saved. Bifrost writes it into the world at the server's next restart.")}</span>${r.canRestart ? '<button class="btn small" id="cfg-restart">Repornește serverul când e gol</button>' : ''}`
+    : r.pushed
     ? `<span>${CFG.game !== 'valheim' ? L('Salvat și trimis pe server. Se aplică la repornirea serverului.', 'Saved and sent to the server. It applies when the server restarts.') : 'Salvat și trimis pe server. Modurile cu sincronizare de configurări îl aplică imediat; restul, la restart.'}</span>${r.canRestart ? '<button class="btn small" id="cfg-restart">Repornește serverul când e gol</button>' : ''}`
     : r.later ? '<span>Salvat. Ajunge pe server imediat ce termin ce lucrez acum.</span>'
       : r.error ? `<span>Salvat în profil, dar nu l-am putut trimite pe server: ${esc(r.error)}</span>`
