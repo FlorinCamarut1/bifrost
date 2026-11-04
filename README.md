@@ -28,6 +28,7 @@ Download from [Releases](../../releases/latest):
 **Linux** (x64)
 
 - `Bifrost-x.y.z-linux-amd64.deb` - Debian / Ubuntu / Mint: `sudo apt install ./Bifrost-x.y.z-linux-amd64.deb`, or
+- `Bifrost-x.y.z-linux-x86_64.pacman` - Arch / CachyOS / Manjaro: `sudo pacman -U ./Bifrost-x.y.z-linux-x86_64.pacman`, or
 - `Bifrost-x.y.z-linux-x86_64.AppImage` - any distro: `chmod +x Bifrost-*.AppImage` and run it (needs FUSE 2,
   e.g. `libfuse2` / `libfuse2t64` on Ubuntu).
 
@@ -108,7 +109,7 @@ Bifrost installs it (it registers the `nxm://` link); Premium downloads directly
 npm install
 npm start           # run from source
 npx electron-builder --win nsis zip --publish never      # Windows
-npx electron-builder --linux AppImage deb --publish never  # Linux
+npx electron-builder --linux AppImage deb pacman --publish never  # Linux (pacman needs bsdtar)
 ```
 
 Releases (Windows + Linux) are built by GitHub Actions when a `v*` tag is pushed (`.github/workflows/release.yml`).

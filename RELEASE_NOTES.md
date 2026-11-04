@@ -1,4 +1,9 @@
-﻿## Bifrost 2.6.3
+﻿## Bifrost 2.6.4
+
+- **A package for Arch Linux, CachyOS and Manjaro:** `Bifrost-2.6.4-linux-x86_64.pacman`, installed with `sudo pacman -U ./Bifrost-2.6.4-linux-x86_64.pacman`. It needs no FUSE, unlike the AppImage. After that, Bifrost updates itself from the app, like on Windows.
+- On Linux, Enshrouded runs through Proton: start it once from Steam without mods and close it, then press PLAY in Bifrost.
+
+## Bifrost 2.6.3
 
 - **The in-game XHL settings (F10) are in Bifrost too.** The ⚙ button next to an XHL mod also opens "F10 · world rules (server)" and "F10 · yours (PC)", next to its config.txt.
 - **World rules are kept on the server**, the same for every player, for example XHL-Vein-Mining's list of materials that chain-mine. A mod's config.txt only gives a new world its first values, so editing materialIds there did nothing on an existing world. Bifrost writes the world's rules when the server restarts, while it is stopped, because the server rewrites the file while it runs. Only the values you changed are written.
