@@ -27,6 +27,14 @@ Download from [Releases](../../releases/latest):
 
 **Linux** (x64)
 
+One command (any distro: the right package for Arch / CachyOS / Manjaro, Debian / Ubuntu / Mint, or the AppImage):
+
+```
+curl -fsSL https://raw.githubusercontent.com/FlorinCamarut1/bifrost/main/install.sh | bash
+```
+
+or by hand:
+
 - `Bifrost-x.y.z-linux-amd64.deb` - Debian / Ubuntu / Mint: `sudo apt install ./Bifrost-x.y.z-linux-amd64.deb`, or
 - `Bifrost-x.y.z-linux-x86_64.pacman` - Arch / CachyOS / Manjaro: `sudo pacman -U ./Bifrost-x.y.z-linux-x86_64.pacman`, or
 - `Bifrost-x.y.z-linux-x86_64.AppImage` - any distro: `chmod +x Bifrost-*.AppImage` and run it (needs FUSE 2,
