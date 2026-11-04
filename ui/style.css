@@ -595,6 +595,10 @@ div.setting { cursor: default; }
 .pk-bg { position: absolute; z-index: -2; top: 0; left: 0; width: 100%; height: var(--band); object-fit: cover; pointer-events: none;
   filter: blur(18px) saturate(1.6) brightness(.7); transform: scale(1.35); }
 .pk-bg.wide { filter: saturate(1.1) brightness(.7); transform: none; }
+/* (a Thunderstore mod's picture from its README: fades in over the blurred icon) */
+.pk-bg.cover { filter: saturate(1.05) brightness(.62); transform: none; object-position: center 35%; }
+.pk-bg.cover.fresh { animation: pk-cover var(--dur-3) var(--ease-out); }
+@keyframes pk-cover { from { opacity: 0; } }
 .pk > img:not(.pk-bg), .pk > .ph { position: relative; align-self: start; width: 56px; height: 56px; object-fit: cover; border-radius: var(--r-2);
   background-color: var(--inset); border: 2px solid var(--pk-bg); box-shadow: 0 8px 18px rgba(0, 0, 0, .55); }
 .pk > .ph { display: grid; place-items: center; }

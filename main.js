@@ -40,6 +40,7 @@ const { syncMods } = require('./lib/modsync');
 const { syncConfigs, SKIP: CFG_SKIP, safeRel } = require('./lib/serversync');
 const bepcfg = require('./lib/bepcfg');
 const xhlcfg = require('./lib/xhlcfg');
+const { Covers } = require('./lib/tscover');
 const sharedcfg = require('./lib/sharedcfg');
 const serverenv = require('./lib/serverenv');
 const enssettings = require('./lib/enssettings');
@@ -61,6 +62,9 @@ const ICON = path.join(__dirname, 'ui', 'app.png');
 const TS = 'https://thunderstore.io';
 const ELECTRON_MAJOR = +process.versions.electron.split('.')[0];
 const fetchN = (...a) => net.fetch(...a);
+let tsCovers = null;   // Discover tiles' pictures (lib/tscover.js), made on first use
+const covers = () => tsCovers ||= new Covers({ file: path.join(DATA, 'ts-covers.json'), fetch: fetchN,
+  readmeUrl: p => `${TS}/api/experimental/package/${encodeURIComponent(p.owner)}/${encodeURIComponent(p.name)}/${encodeURIComponent(p.ver)}/readme/` });
 
 app.setAppUserModelId(APP_ID);
 // --data=<dir>: a separate Bifrost (own settings + profiles), for tests
@@ -2488,6 +2492,8 @@ async function action(name, arg) {
     case 'install': return installPackage(arg.full, arg.ver);
     case 'remove': return removePackage(arg);
     case 'updateAll': return updateAll();
+    case 'tsCover': try { return { ok: true, ...(await covers().get(arg)) }; } catch (e) { return { ok: false, error: e.message }; }
+    case 'tsCoverPick': return { ok: covers().pick(arg, arg.url ?? null) };
     case 'readme': {
       try {
         const r = await fetchN(`${TS}/api/experimental/package/${encodeURIComponent(arg.owner)}/${encodeURIComponent(arg.name)}/${encodeURIComponent(arg.ver)}/readme/`);

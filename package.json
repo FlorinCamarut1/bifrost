@@ -1,7 +1,7 @@
 {
   "name": "bifrost",
   "productName": "Bifrost",
-  "version": "2.6.5",
+  "version": "2.6.6",
   "description": "Enshrouded and Valheim mod manager and server companion",
   "main": "main.js",
   "private": true,

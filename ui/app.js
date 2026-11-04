@@ -564,13 +564,45 @@ function renderBrowse(reset) {
   renderBrowseSub();
   const list = browseList();
   const shown = list.slice(0, S.blimit);
-  $('#br-grid').innerHTML = shown.map(p => `
+  $('#br-grid').innerHTML = shown.map(p => { const cv = coverSeen.get(`${p.full}@${p.ver}`); return `
     <div class="pk" data-pk="${esc(p.full)}">
-      ${p.icon ? `<img class="pk-bg" src="${esc(p.icon)}" alt="" aria-hidden="true" loading="lazy"><img src="${esc(p.icon)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
+      ${p.icon ? `<img class="pk-bg${cv ? ' cover' : ''}" src="${esc(cv || p.icon)}" alt="" aria-hidden="true" loading="lazy"><img src="${esc(p.icon)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
       <div><div class="pk-name">${esc(pkTitle(p))}</div><div class="pk-owner">de ${esc(p.owner)}</div><div class="pk-desc">${esc(p.desc)}</div></div>
       <div class="pk-foot"><span class="pk-stat" title="descărcări">${ICON_DL}${fmtNum(p.dl)}</span><span class="pk-stat" title="aprecieri">${ICON_STAR}${fmtNum(p.rating)}</span>${sideTags(p)}${pkButton(p)}</div>
-    </div>`).join('');
+    </div>`; }).join('');
+  coverObs.disconnect(); for (const el of $('#br-grid').querySelectorAll('.pk')) coverObs.observe(el);
   $('#br-more').textContent = !list.length ? 'Nimic găsit.' : list.length > shown.length ? L(`${shown.length} din ${list.length.toLocaleString(LOC())} - derulează pentru mai multe`, `${shown.length} of ${list.length.toLocaleString(LOC())} - scroll for more`) : L(`${list.length} moduri`, `${list.length} ${list.length === 1 ? 'mod' : 'mods'}`);
+}
+// a picture from the mod's README behind its tile, like Nexus's (lib/tscover.js); the blurred icon until one is found
+const coverSeen = new Map();   // full@ver -> url | null
+const coverObs = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { coverObs.unobserve(e.target); loadCover(e.target); } }, { root: document.querySelector('main'), rootMargin: '300px' });
+function setCover(el, url, icon) {
+  const bg = el.querySelector('.pk-bg'); if (!bg || !url) return;
+  bg.onerror = () => { bg.onerror = null; bg.classList.remove('cover'); if (icon) bg.src = icon; };
+  if (bg.classList.contains('cover') && bg.getAttribute('src') === url) return;
+  bg.classList.add('cover', 'fresh'); bg.src = url;
+}
+// 'wide' (a picture that fills the band), 'no' (too small or square), 'fail' (did not load: try again another time)
+const probeCover = u => new Promise(res => {
+  const i = new Image(), t = setTimeout(() => res('fail'), 10000);
+  i.onload = () => { clearTimeout(t); res(i.naturalWidth >= 320 && i.naturalWidth / i.naturalHeight >= 1.15 ? 'wide' : 'no'); };
+  i.onerror = () => { clearTimeout(t); res('fail'); };
+  i.src = u;
+});
+async function loadCover(el) {
+  const p = S.catalog?.find(x => x.full === el.dataset.pk); if (!p) return;
+  const k = `${p.full}@${p.ver}`, who = { owner: p.owner, name: p.name, ver: p.ver };
+  if (coverSeen.has(k)) return setCover(el, coverSeen.get(k), p.icon);
+  const r = await window.vp.act('tsCover', who).catch(() => null);
+  if (!r?.ok) return;
+  let url = r.pick, failed = false;
+  if (url === undefined) {
+    url = null;
+    for (const u of r.list || []) { const v = await probeCover(u); if (v === 'wide') { url = u; break; } if (v === 'fail') failed = true; }
+    if (url || !failed) window.vp.act('tsCoverPick', { ...who, url });
+  }
+  coverSeen.set(k, url);
+  if (el.isConnected) setCover(el, url, p.icon);
 }
 // (Nexus pages do not need the Thunderstore catalog: Enshrouded never loads it, and its list stopped at 30)
 const moreObs = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); }, { root: document.querySelector('main'), rootMargin: '600px' });
