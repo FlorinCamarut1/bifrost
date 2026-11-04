@@ -1101,7 +1101,8 @@ function syncGameOpts() {
   if (isValheim()) return {};
   return { guessSide: () => ['server', `${gdef().name}: on the server and for every player - mark it client if it only changes this PC`] };
 }
-// EML games: the loader (dbghelp.dll + its files) goes next to the dedicated server's exe; true when something was sent
+// EML games: the loader (EML's dbghelp.dll, plus native plugin hosts such as XHL-Core's dinput8.dll) goes next to the
+// dedicated server's exe; true when something was sent or taken away
 let loaderEnvWarned = false;
 async function syncLoader(tr) {
   if (gdef().loader !== 'eml') return false;
@@ -1136,11 +1137,24 @@ async function syncLoader(tr) {
     const exe = gdef().server?.exe || 'enshrouded_server.exe';
     const env = await tr.ssh(`for p in $(docker top ${shq(tr.conn.container)} -eo pid,args | grep -F ${shq(exe)} | awk '{print $1}'); do e=$(tr '\\0' '\\n' < /proc/$p/environ 2>/dev/null) && { echo READ; echo "$e" | grep '^WINEDLLOVERRIDES='; }; done; echo END`, { timeout: 20000 }).catch(() => null);
     const lines = env === null ? [] : env.split('\n').filter(l => l.startsWith('WINEDLLOVERRIDES='));
-    if (env !== null && /READ/.test(env) && !lines.some(l => /dbghelp\s*=\s*n/i.test(l))) {
+    // every proxy DLL (dbghelp for EML, dinput8 for XHL-Core) needs its own entry; a group like
+    // "dbghelp,dinput8,dsound=n,b" (indifferentbroccoli's start script) counts for each of them
+    const native = dll => lines.some(l => l.slice(17).split(';').some(g => { const [names, mode = ''] = g.split('='); return /^n/i.test(mode.trim()) && names.split(',').some(n => n.trim().toLowerCase() === dll); }));
+    const missing = env !== null && /READ/.test(env) ? files.map(f => f.rel.replace(/\.dll$/i, '').toLowerCase()).filter(d => !/\./.test(d) && !native(d)) : [];
+    if (missing.length) {
       loaderEnvWarned = true;
-      log('  the server container has no WINEDLLOVERRIDES=dbghelp=native,builtin - Wine will not load EML, so the server runs without mods. Add it to the container\'s environment (docker compose) and recreate it.', 'error');
-      notify('Bifrost: EML is not loaded on the server', 'Add WINEDLLOVERRIDES=dbghelp=native,builtin to the container environment.', 'warn');
+      const want = `WINEDLLOVERRIDES=${missing.join(',')}=native,builtin`;
+      log(`  the server container has no ${want} - Wine will not load ${missing.join(' / ')}, so the server runs without ${missing.includes('dbghelp') ? 'mods' : 'those mods'}. Add it to the container's environment (docker compose) and recreate it.`, 'error');
+      notify(`Bifrost: ${missing.join(' / ')} is not loaded on the server`, `Add ${want} to the container environment.`, 'warn');
     }
+  }
+  // a native plugin host that left the profile (XHL-Core uninstalled): its DLL on the server goes too
+  let placed = [];
+  try { placed = JSON.parse(String(await tr.read(tr.serverDir, 'bifrost-loader.json'))).files || []; } catch { }
+  const stale = placed.filter(n => !files.some(f => f.rel.toLowerCase() === String(n).toLowerCase()) && /^[\w.-]+\.(dll|ini)$/i.test(n));
+  if (stale.length) {
+    await tr.remove(tr.serverDir, stale);
+    log(`  taken off the server: ${stale.join(', ')}`, 'out');
   }
   const changed = [];
   for (const f of files) {
@@ -1149,10 +1163,13 @@ async function syncLoader(tr) {
     const data = fs.readFileSync(f.abs);
     if (!remote || !remote.equals(data)) changed.push({ name: f.rel, data });
   }
-  if (!changed.length) return false;
+  const list = files.map(f => f.rel);
+  if (stale.length || list.some(n => !placed.includes(n))) changed.push({ name: 'bifrost-loader.json', data: Buffer.from(JSON.stringify({ files: list }, null, 2)) });
+  if (!changed.length) return !!stale.length;
   await tr.put(tr.serverDir, changed);
-  log(`  EML put on the server (${changed.map(f => f.name).join(', ')})`, 'out');
-  return true;
+  const sent = changed.map(f => f.name).filter(n => n !== 'bifrost-loader.json');
+  if (sent.length) log(`  loader put on the server (${sent.join(', ')})`, 'out');
+  return !!(sent.length || stale.length);
 }
 async function syncNow(reason) {
   const s = srv();
@@ -1567,7 +1584,7 @@ async function fixDockerServerDir(s = srv()) {
     s.conn.serverDir = found; saveSettings(); send('settings', publicSettings());
     log(`${gdef(s).name} server folder: ${old || '(none)'} → ${found} (the path inside the container)`, 'done');
     // what went to the old path lived only in the container's own layer, never in the server's folder
-    if (old && !mounts.some(m => old === m.dst || old.startsWith(m.dst + '/'))) await tr.run(`rm -rf ${shq(`${old}/dbghelp.dll`)} ${shq(`${old}/mods`)}`, { timeout: 20000 }).catch(() => { });
+    if (old && !mounts.some(m => old === m.dst || old.startsWith(m.dst + '/'))) await tr.run(`rm -rf ${shq(`${old}/dbghelp.dll`)} ${shq(`${old}/dinput8.dll`)} ${shq(`${old}/bifrost-loader.json`)} ${shq(`${old}/mods`)}`, { timeout: 20000 }).catch(() => { });
   } catch (e) { log(`server folder check: ${e.message}`, 'error'); }
 }
 async function ensLocate() {

@@ -1,4 +1,10 @@
-﻿## Bifrost 2.6.0
+﻿## Bifrost 2.6.1
+
+- **XHL-Core installs from Nexus.** It was refused with "This file has no mod.json, so EML cannot load it". Its dinput8.dll is a loader like EML's dbghelp.dll: Bifrost puts it next to enshrouded.exe on your PC and next to enshrouded_server.exe on the server, so XHL mods with a DLL part (XHL-Planting-Assistant) work. Friends get it with the server's list like any other mod.
+- Another mod's dinput8.dll that was already in the game folder is kept in bifrost-backup, and "Put back" restores it. Removing XHL-Core takes its dinput8.dll away from the game and the server.
+- The server check for WINEDLLOVERRIDES understands grouped entries such as `dbghelp,dinput8,dsound=n,b` (the indifferentbroccoli image's start script) and also checks dinput8 when XHL-Core is installed.
+
+## Bifrost 2.6.0
 
 - **Enshrouded Patcher is out of Bifrost again**: an Enshrouded server loads EML mods only, as before 2.5.0. A server that was set to the patcher becomes an EML server by itself. In Steam, Enshrouded → Properties → Installed Files → Verify integrity puts the game's own files back.
 - **XHL mods (and other EML mods that carry a copy of EML) install again.** They stopped with "Already installed: EML - Enshrouded Mod Loader has the same dbghelp.dll". That copy is the loader, not the mod, and only the mod is installed.
