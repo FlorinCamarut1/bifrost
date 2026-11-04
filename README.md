@@ -48,6 +48,10 @@ Bifrost finds Steam (native, Flatpak or Snap) and both ways of running Valheim o
   in the game's Proton prefix, so no Steam launch options are needed. Start Valheim once from Steam first, so that the
   prefix exists.
 
+Enshrouded has no Linux build: it runs under Proton, with EML's `dbghelp.dll` (and XHL-Core's `dinput8.dll`) next to
+`enshrouded.exe` and their DLL overrides in the game's Proton prefix. Here too, start the game once from Steam, without
+mods, and close it before the first PLAY.
+
 Settings, profiles and the download cache live in `~/.config/Bifrost`.
 
 Bifrost is not code-signed. SmartScreen may say *Windows protected your PC* → *More info → Run anyway*. On PCs with

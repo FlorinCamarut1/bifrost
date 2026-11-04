@@ -1,4 +1,16 @@
-﻿## Bifrost 2.6.4
+﻿## Install
+
+- **Windows:** `Bifrost-Setup-x.y.z.exe` (installer) or `Bifrost-x.y.z-win.zip` (portable: unzip it, run `Bifrost.exe`).
+- **Linux** (CachyOS, Arch, Manjaro, Ubuntu, Mint, ...): one command in a terminal. It installs or updates Bifrost and starts it:
+
+  ```
+  curl -fsSL https://raw.githubusercontent.com/FlorinCamarut1/bifrost/main/install.sh | bash
+  ```
+
+  Then start the game once from Steam, without mods, and close it before the first PLAY (Proton sets up its folder).
+- Once installed, Bifrost updates itself from the app.
+
+## Bifrost 2.6.4
 
 - **A package for Arch Linux, CachyOS and Manjaro:** `Bifrost-2.6.4-linux-x86_64.pacman`, installed with `sudo pacman -U ./Bifrost-2.6.4-linux-x86_64.pacman`. It needs no FUSE, unlike the AppImage. After that, Bifrost updates itself from the app, like on Windows.
 - On Linux, Enshrouded runs through Proton: start it once from Steam without mods and close it, then press PLAY in Bifrost.

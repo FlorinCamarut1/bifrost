@@ -22,6 +22,10 @@
   ol b { color: var(--text); }
   .err { color: #ef8b8b; }
   #ts { border-top: 1px solid var(--line); padding-top: 14px; }
+  .cmd { display: flex; gap: 6px; align-items: stretch; margin-top: 6px; }
+  .cmd code { margin: 0; flex: 1; text-align: left; color: var(--text); }
+  .cmd button { flex: none; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: #ffffff0a; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+  .os { margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -32,7 +36,13 @@
   <a class="btn primary" id="open" href="#">Open in Bifrost</a>
   <a class="btn" href="https://github.com/FlorinCamarut1/bifrost/releases/latest">No Bifrost yet - download it</a>
   <ol>
-    <li>Install <b>Bifrost</b> (the installer, or the portable zip).</li>
+    <li>Install <b>Bifrost</b>:
+      <div class="os" id="os-win"><b>Windows</b>: from the download page, <b>Bifrost-Setup-x.y.z.exe</b> (the installer) or <b>Bifrost-x.y.z-win.zip</b> (portable: unzip it, run Bifrost.exe).</div>
+      <div class="os" id="os-linux"><b>Linux</b> (CachyOS, Arch, Manjaro, Ubuntu, Mint, ...): open a terminal and run this one command. It installs Bifrost, or updates it, and starts it.
+        <div class="cmd"><code id="cmd">curl -fsSL https://raw.githubusercontent.com/FlorinCamarut1/bifrost/main/install.sh | bash</code><button type="button" id="copy">Copy</button></div>
+        Then start the game <b>once from Steam, without mods</b>, and close it (Proton sets up its folder), before the first PLAY.
+      </div>
+    </li>
     <li>Press <b>Open in Bifrost</b> - or in Bifrost: <b>I got an invite</b> and paste the code:<br><code id="code">-</code></li>
     <li>Press <b>PLAY</b>: the server&#39;s mods install by themselves.</li>
   </ol>
@@ -46,6 +56,9 @@
   // the invite code is after the "#": g.<gist> | r.<owner>/<repo>[/path] | u.<base64url>
   const code = decodeURIComponent(location.hash.slice(1));
   const $ = id => document.getElementById(id);
+  // Linux first on a Linux PC
+  if (/linux/i.test(navigator.userAgent) && !/android/i.test(navigator.userAgent)) $('os-win').before($('os-linux'));
+  $('copy').onclick = () => navigator.clipboard.writeText($('cmd').textContent).then(() => { $('copy').textContent = 'Copied'; setTimeout(() => { $('copy').textContent = 'Copy'; }, 1500); }).catch(() => { });
   if (!/^[gru]\.[\w./-]+$/.test(code)) { $('sub').innerHTML = '<span class="err">This invite link is incomplete.</span>'; $('open').style.display = 'none'; }
   else {
     $('code').textContent = code;
