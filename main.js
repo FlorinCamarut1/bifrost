@@ -1,4 +1,4 @@
-// Bifrost - Valheim mod manager for playing on modded servers with friends.
+// Bifrost - Enshrouded and Valheim mod manager for playing on modded servers with friends.
 // Every server is its own entry with its own mod profile:
 //   player: reads the server's list (server.json: Gist / GitHub / URL), installs exactly those mods, starts Valheim.
 //   admin : manages the mods in Bifrost, syncs them + configs to the server (SSH+Docker / SSH / local / FTP),
@@ -307,7 +307,7 @@ function trayMenu() {
 
 const devShortcut = extraArgs => ({
   target: process.execPath, args: `"${__dirname}"${extraArgs ? ' ' + extraArgs : ''}`, cwd: __dirname,
-  icon: path.join(__dirname, 'ui', 'app.ico'), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Valheim',
+  icon: path.join(__dirname, 'ui', 'app.ico'), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Enshrouded and Valheim',
 });
 const startMenu = () => path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs');
 // Windows takes the taskbar and shortcut icon from a real .ico file. The installer's resources\app.ico stays the one of the
@@ -326,7 +326,7 @@ function ownIcon() {
 }
 // the shortcut for whichever Bifrost runs: from source (electron.exe + folder) or a build (Bifrost.exe, portable or installed)
 const ownShortcut = extraArgs => app.isPackaged
-  ? { target: process.execPath, args: extraArgs || '', cwd: path.dirname(process.execPath), icon: ownIcon(), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Valheim' }
+  ? { target: process.execPath, args: extraArgs || '', cwd: path.dirname(process.execPath), icon: ownIcon(), iconIndex: 0, appUserModelId: APP_ID, description: 'Bifrost - Enshrouded and Valheim' }
   : devShortcut(extraArgs);
 // Linux: one bifrost.desktop (same name as the .deb's, so it shadows it instead of showing twice) for the menu and the
 // bifrost:// + nxm:// links, and a copy in ~/.config/autostart for "start at login"
@@ -336,7 +336,7 @@ function desktopEntry(extra) {
   const exec = app.isPackaged ? q(process.env.APPIMAGE || process.execPath) : `${q(process.execPath)} ${q(__dirname)}`;
   const icon = path.join(DATA, 'bifrost.png');
   try { fs.copyFileSync(ICON, icon); } catch { }
-  return ['[Desktop Entry]', 'Type=Application', 'Name=Bifrost', 'Comment=Valheim mod manager', `Exec=${exec}${extra}`, `Icon=${icon}`,
+  return ['[Desktop Entry]', 'Type=Application', 'Name=Bifrost', 'Comment=Enshrouded and Valheim mod manager', `Exec=${exec}${extra}`, `Icon=${icon}`,
     'Terminal=false', 'Categories=Game;', 'StartupWMClass=Bifrost', 'MimeType=x-scheme-handler/bifrost;x-scheme-handler/nxm;', ''].join('\n');
 }
 function applyStartupLinux() {

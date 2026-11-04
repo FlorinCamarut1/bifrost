@@ -2,7 +2,7 @@
   "name": "bifrost",
   "productName": "Bifrost",
   "version": "2.6.5",
-  "description": "Valheim and Enshrouded mod manager and server companion",
+  "description": "Enshrouded and Valheim mod manager and server companion",
   "main": "main.js",
   "private": true,
   "scripts": {
@@ -119,7 +119,7 @@
       "category": "Game",
       "executableName": "bifrost",
       "maintainer": "FlorinCamarut1 <95957482+FlorinCamarut1@users.noreply.github.com>",
-      "synopsis": "Valheim mod manager and server companion",
+      "synopsis": "Enshrouded and Valheim mod manager and server companion",
       "desktop": {
         "entry": {
           "StartupWMClass": "Bifrost",

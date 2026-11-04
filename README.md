@@ -1,10 +1,11 @@
 # Bifrost
 
-A Valheim mod manager built for one thing: playing on a modded server with friends, where everyone always has exactly
-the server's mods.
+An Enshrouded and Valheim mod manager built for one thing: playing on a modded server with friends, where everyone
+always has exactly the server's mods.
 
 - **Players** open an invite link, press **PLAY**, and Bifrost installs the server's mods (exact versions, from
-  Thunderstore and Nexus Mods), keeps them up to date and starts Valheim through Steam with them.
+  Thunderstore and Nexus Mods), keeps them up to date and starts the game through Steam with them.
+- **Enshrouded** mods (Nexus Mods) run through EML, XHL-Core's DLL mods too; **Valheim** mods through BepInEx.
 - **Server admins** manage the mods in Bifrost. Bifrost puts them on the server, keeps the configs in sync both ways,
   restarts the server only when nobody is playing, and publishes the list their friends' Bifrost reads.
 - Every server has its own mod profile; switch between servers in the sidebar. Personal profiles (no server) work too.
