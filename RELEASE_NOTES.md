@@ -1,4 +1,10 @@
-﻿## Bifrost 2.6.1
+﻿## Bifrost 2.6.2
+
+- **Enshrouded mods have settings in Bifrost.** The ⚙ button next to an Enshrouded mod opens its config.txt (XHL-Max-Stack: maxStackSize, XHL-Workshop-Speed: multiplier, ...) as a settings form, with the mod's own comments as descriptions. Saving sends the mod to the server; it applies when the server restarts.
+- Settings you changed stay when the mod is updated, and go away with the mod when it is uninstalled.
+- Settings changed in the game (F10: XHL-Planting-Assistant, XHL-Remote-Chest) are each player's own and stay in the game.
+
+## Bifrost 2.6.1
 
 - **XHL-Core installs from Nexus.** It was refused with "This file has no mod.json, so EML cannot load it". Its dinput8.dll is a loader like EML's dbghelp.dll: Bifrost puts it next to enshrouded.exe on your PC and next to enshrouded_server.exe on the server, so XHL mods with a DLL part (XHL-Planting-Assistant) work. Friends get it with the server's list like any other mod.
 - Another mod's dinput8.dll that was already in the game folder is kept in bifrost-backup, and "Put back" restores it. Removing XHL-Core takes its dinput8.dll away from the game and the server.

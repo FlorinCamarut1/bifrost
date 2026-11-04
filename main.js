@@ -31,7 +31,7 @@ app.commandLine.appendSwitch('disk-cache-size', String(100 * 1024 * 1024));
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
-const { Profile, BEPINEX, EML, EML_REPO, emlSupports, cmpVer, parseDep } = require('./lib/profile');
+const { Profile, BEPINEX, EML, EML_REPO, emlSupports, emlConfig, cmpVer, parseDep } = require('./lib/profile');
 const { Nexus } = require('./lib/nexus');
 const { build: buildServerList } = require('./lib/manifest');
 const listhost = require('./lib/listhost');
@@ -466,7 +466,8 @@ function getProfile() {
 }
 // the folder with one entry per mod: BepInEx/plugins (Valheim), mods (Enshrouded / EML)
 const pluginsDir = () => path.join(getProfile().dir, ...gdef().modsDir.split('/'));
-const configDir = () => path.join(getProfile().dir, 'BepInEx', 'config');
+// (EML games: each mod keeps its settings in its own folder, mods/<mod>/config.txt - see emlConfig)
+const configDir = () => gdef().loader === 'eml' ? pluginsDir() : path.join(getProfile().dir, 'BepInEx', 'config');
 const statePath = () => path.join(serverDir(srv().id), 'state.json');
 function readState() { const j = srv() ? readJson(statePath(), {}) : {}; return { mods: j.mods || {}, installed: j.installed || [], restartPending: !!j.restartPending, uploaded: j.uploaded || {} }; }
 const writeState = st => writeJson(statePath(), st);
@@ -657,7 +658,8 @@ function removePackageNow(key) {
   const users = Object.entries(pr.packages).filter(([k, x]) => k !== key && (x.deps || []).some(d => parseDep(d)?.full === key)).map(([k]) => k);
   if (users.length) return { ok: false, error: `Needed by: ${users.join(', ')}. Remove those first.` };
   if (p.role === 'recommended') { const s = srv(); delete s.recommended[key]; delete s.nexusChosen[key]; saveSettings(); }
-  const configs = [...(cfgIndex.owners || [])].filter(([, k]) => k === key).map(([r]) => r);
+  // (EML games: a mod's settings are in its own folder and leave with it - nothing to ask about)
+  const configs = gdef().loader === 'eml' ? [] : [...(cfgIndex.owners || [])].filter(([, k]) => k === key).map(([r]) => r);
   pr.remove(key);
   for (const k of pr.orphans()) pr.remove(k);
   log(`${key} uninstalled`);
@@ -1394,6 +1396,12 @@ let twoWayBusy = false;
 // of the mod's DLLs; with several candidates, the package whose name shares most words with it
 async function configOwners(rels) {
   const pr = getProfile(), best = new Map();
+  // EML games: the package that installed the folder the file is in
+  if (gdef().loader === 'eml') {
+    const own = new Map();
+    for (const [k, p] of Object.entries(pr.packages)) for (const f of [...(p.files || []), ...(p.configs || [])]) { const d = f.split('/'); if (d[0] === 'mods' && d.length > 2) own.set(d[1], k); }
+    return new Map(rels.filter(r => own.has(r.split('/')[0])).map(r => [r, own.get(r.split('/')[0])]));
+  }
   // [BepInPlugin(guid, name, version)] is stored as length-prefixed strings one after the other: the DLL with
   // "<guid><name>" declares the plugin, others only mention the GUID (soft dependencies, compatibility code -
   // PlanBuild names aedenthorn.CraftFromContainers)
@@ -1452,7 +1460,7 @@ async function configSides(rels) {
 const cfgIndex = { sig: null, owners: null, building: null };
 function configRels() {
   // .cfg files first (the mod's main settings), then the rest by name
-  try { return walk(configDir()).filter(r => safeRel(r) && !CFG_SKIP.some(x => x.test(r))).sort((a, b) => (/\.cfg$/i.test(b) - /\.cfg$/i.test(a)) || a.localeCompare(b)); } catch { return []; }
+  try { return walk(configDir()).filter(r => safeRel(r) && !CFG_SKIP.some(x => x.test(r)) && (gdef().loader !== 'eml' || emlConfig(r))).sort((a, b) => (/\.cfg$/i.test(b) - /\.cfg$/i.test(a)) || a.localeCompare(b)); } catch { return []; }
 }
 function configSig(rels) { const pr = getProfile(); return JSON.stringify([3, srv()?.id, Object.entries(pr.packages).map(([k, p]) => `${k}@${p.ver}`).sort(), rels]); }
 // kept on disk too: it only changes when mods or config files do
@@ -1481,7 +1489,8 @@ function configCounts() {
   return out;
 }
 const cfgPath = rel => {
-  if (typeof rel !== 'string' || !safeRel(rel) || CFG_SKIP.some(x => x.test(rel))) throw new Error('Fișier de config invalid.');
+  // (EML games: only a mod's settings file - never its manifest, script or DLL)
+  if (typeof rel !== 'string' || !safeRel(rel) || CFG_SKIP.some(x => x.test(rel)) || (gdef().loader === 'eml' && !emlConfig(rel))) throw new Error('Fișier de config invalid.');
   return path.join(configDir(), ...rel.split('/'));
 };
 const sha1 = t => crypto.createHash('sha1').update(t).digest('hex');
@@ -1757,6 +1766,17 @@ async function saveConfig({ rel, changes, text, expect }) {
   const gameOn = await checkGameProcess().catch(() => false);
   if (gameOn) try { guardEdit(rel, cur, next, changes); } catch (e) { log(`config guard: ${e.message}`, 'error'); }
   const s = srv();
+  // EML games: the file is part of its mod's folder, so the mod sync sends it (the whole mod, like any changed mod);
+  // EML reads it when the server starts
+  if (gdef().loader === 'eml') {
+    if (!isAdmin() || !s.conn) return { ok: true, pushed: false, local: true, hash: sha1(next), gameRunning: gameOn };
+    for (let i = 0; i < 30 && (job || restarting); i++) await new Promise(r => setTimeout(r, 500));
+    if (job || restarting) { changedAt = Date.now(); return { ok: true, pushed: false, later: true, hash: sha1(next), gameRunning: gameOn }; }
+    const before = watch.lastSync;
+    await syncNow('config edited');
+    if (watch.lastSync === before) return { ok: true, pushed: false, error: watch.lastResult?.text || 'the sync did not run', hash: sha1(next), gameRunning: gameOn };
+    return { ok: true, pushed: true, canRestart: !!transport()?.canRestart, hash: sha1(next), gameRunning: gameOn };
+  }
   if (isAdmin() && (s.sharedConfigs || []).includes(rel)) schedulePublish('shared settings');
   if (!isAdmin() || !s.conn || !s.syncConfigs) return { ok: true, pushed: false, local: true, hash: sha1(next), gameRunning: gameOn };
   { const pd = readPending(); pd[rel] = { sha: normSha(Buffer.from(next)), at: Date.now() }; writePending(pd); }
@@ -2261,7 +2281,8 @@ async function action(name, arg) {
         let size = 0; try { size = fs.statSync(cfgPath(rel)).size; } catch { }
         return { rel, size, kind: /\.cfg$/i.test(rel) ? 'cfg' : 'text' };
       });
-      return { ok: true, files, server: isAdmin() && !!srv().conn && !!srv().syncConfigs, side: readState().mods[arg] || null };
+      // (EML games: the mod sync sends them, not the config sync)
+      return { ok: true, files, server: isAdmin() && !!srv().conn && (gdef().loader === 'eml' || !!srv().syncConfigs), side: readState().mods[arg] || null, game: gdef().id };
     }
     case 'shareConfig': {   // { rel, on }: players get this file's non-default settings too
       if (!isAdmin() || !s) return { ok: false };
@@ -2277,7 +2298,8 @@ async function action(name, arg) {
       const p = cfgPath(arg);
       if (fs.statSync(p).size > 4 * 1024 * 1024) return { ok: false, error: 'Fișierul e prea mare pentru editor (peste 4 MB).' };
       const text = fs.readFileSync(p, 'utf8');
-      return { ok: true, text, hash: sha1(text), parsed: /\.cfg$/i.test(arg) ? bepcfg.parse(text) : null };
+      // (EML mods' config.txt / .ini: key=value lines the same parser reads)
+      return { ok: true, text, hash: sha1(text), parsed: /\.cfg$/i.test(arg) || (gdef().loader === 'eml' && /\.(txt|ini)$/i.test(arg)) ? bepcfg.parse(text) : null };
     } catch (e) { return { ok: false, error: e.message }; }
     case 'serverEnvRead': try { return await serverEnvRead(); } catch (e) { return { ok: false, error: e.message }; }
     case 'serverEnvSave': try { return await serverEnvSave(arg || {}); } catch (e) { return { ok: false, error: e.message }; }

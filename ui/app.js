@@ -785,7 +785,7 @@ async function openConfigDrawer(key, title) {
   const r = await window.vp.act('modConfigs', key);
   if (S.drawer !== `cfg:${key}`) return;
   if (!r.ok || !r.files.length) { $('#drawer-body').innerHTML = `<div class="empty">${esc(r.error || 'Modul nu are fișiere de configurare (le scrie la prima pornire a jocului).')}</div>`; return; }
-  Object.assign(CFG, { files: r.files, server: r.server, side: r.side });
+  Object.assign(CFG, { files: r.files, server: r.server, side: r.side, game: r.game || 'valheim' });
   await loadConfigFile((r.files.find(f => f.kind === 'cfg') || r.files[0]).rel, true);
 }
 async function loadConfigFile(rel, force) {
@@ -810,7 +810,9 @@ function cfgRow(si, ei, sec, e) {
 }
 function renderConfig() {
   const f = CFG.file;
-  const dest = !CFG.server ? 'Se salvează în profilul tău.' : CFG.side === 'client'
+  const dest = !CFG.server ? 'Se salvează în profilul tău.' : CFG.game !== 'valheim'
+    ? L('Se salvează în profil și se trimite pe server odată cu modul; se aplică la repornirea serverului.', 'Saved in the profile and sent to the server with the mod; it applies when the server restarts.')
+    : CFG.side === 'client'
     ? 'Mod de client: se salvează în profil (și ajunge pe server odată cu celelalte configurări).'
     : 'Se salvează în profil și se trimite imediat pe server.';
   // a few files: buttons; many (EpicLoot, Seasonality...): a list
@@ -822,7 +824,7 @@ function renderConfig() {
   else if (CFG.raw) body = `<textarea class="cfg-raw no-i18n" id="cfg-raw" spellcheck="false">${esc(CFG.rawText ?? f.text)}</textarea>`;
   else {
     const secs = f.parsed.sections, open = secs.length <= 4 || !!CFG.q;
-    body = secs.map((sec, si) => `<details class="cfg-sec" data-sec="${si}" ${open ? 'open' : ''}><summary class="no-i18n">${esc(sec.name)} <span class="muted">${sec.entries.length}</span></summary>
+    body = secs.map((sec, si) => `<details class="cfg-sec" data-sec="${si}" ${open ? 'open' : ''}><summary class="no-i18n">${esc(sec.name || L('Setări', 'Settings'))} <span class="muted">${sec.entries.length}</span></summary>
       <div class="no-i18n">${sec.entries.map((e, ei) => cfgRow(si, ei, sec, e)).join('')}</div></details>`).join('') || '<div class="empty">Fișierul nu are setări.</div>';
   }
   $('#drawer-body').innerHTML = `
@@ -880,12 +882,14 @@ async function saveConfig() {
   CFG.busy = false;
   if (!r.ok) { toast(r.error, 'error'); if (/s-a schimbat|altă versiune/.test(r.error)) await loadConfigFile(CFG.rel, true); else renderConfigBar(); return; }
   CFG.after = r.pushed
-    ? `<span>Salvat și trimis pe server. Modurile cu sincronizare de configurări îl aplică imediat; restul, la restart.</span>${r.canRestart ? '<button class="btn small" id="cfg-restart">Repornește serverul când e gol</button>' : ''}`
+    ? `<span>${CFG.game !== 'valheim' ? L('Salvat și trimis pe server. Se aplică la repornirea serverului.', 'Saved and sent to the server. It applies when the server restarts.') : 'Salvat și trimis pe server. Modurile cu sincronizare de configurări îl aplică imediat; restul, la restart.'}</span>${r.canRestart ? '<button class="btn small" id="cfg-restart">Repornește serverul când e gol</button>' : ''}`
     : r.later ? '<span>Salvat. Ajunge pe server imediat ce termin ce lucrez acum.</span>'
       : r.error ? `<span>Salvat în profil, dar nu l-am putut trimite pe server: ${esc(r.error)}</span>`
         : r.unchanged ? '<span class="muted">Nimic de salvat.</span>' : '<span>Salvat în profil.</span>';
   // (inside the message's own span: the restart button stays next to it)
-  if (!r.unchanged && r.gameRunning) CFG.after = CFG.after.replace('</span>', `<br><small class="muted">${L('Valheim e pornit pe PC: jocul tău folosește noile valori după ce îl repornești. Când îl închizi își scrie setările vechi peste fișier - Bifrost îți pune modificarea la loc.', 'Valheim is running on this PC: your game uses the new values after you restart it. When it closes it writes its old settings over the file - Bifrost puts your edit back.')}</small></span>`);
+  if (!r.unchanged && r.gameRunning) CFG.after = CFG.after.replace('</span>', `<br><small class="muted">${CFG.game !== 'valheim'
+    ? L(`${gameName()} e pornit pe PC: jocul tău folosește noile valori după ce îl repornești.`, `${gameName()} is running on this PC: your game uses the new values after you restart it.`)
+    : L('Valheim e pornit pe PC: jocul tău folosește noile valori după ce îl repornești. Când îl închizi își scrie setările vechi peste fișier - Bifrost îți pune modificarea la loc.', 'Valheim is running on this PC: your game uses the new values after you restart it. When it closes it writes its old settings over the file - Bifrost puts your edit back.')}</small></span>`);
   const keepQ = CFG.q, open = $$('#cfg-body .cfg-sec').filter(d => d.open).map(d => d.dataset.sec), wasRaw = CFG.raw;
   await loadConfigFile(CFG.rel, true);
   if (wasRaw && CFG.file?.parsed && !CFG.raw) { CFG.raw = true; renderConfig(); }
