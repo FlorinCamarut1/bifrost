@@ -10,6 +10,11 @@
   Then start the game once from Steam, without mods, and close it before the first PLAY (Proton sets up its folder).
 - Once installed, Bifrost updates itself from the app.
 
+## Bifrost 2.6.5
+
+- **Switching servers while Bifrost works on one no longer mixes them up.** A switch made during a sync, a restart or an install now waits until it is done, then happens by itself. Before, switching from Enshrouded to Valheim during a sync wrote Enshrouded's mod list over the Valheim server's, and the next Valheim sync offered to remove the 5 XHL mods from the Valheim server.
+- Each server's sync state is always saved back to that server, whichever one is open by then.
+
 ## Bifrost 2.6.4
 
 - **A package for Arch Linux, CachyOS and Manjaro:** `Bifrost-2.6.4-linux-x86_64.pacman`, installed with `sudo pacman -U ./Bifrost-2.6.4-linux-x86_64.pacman`. It needs no FUSE, unlike the AppImage. After that, Bifrost updates itself from the app, like on Windows.

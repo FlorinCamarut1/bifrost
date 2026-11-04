@@ -469,12 +469,29 @@ function getProfile() {
 const pluginsDir = () => path.join(getProfile().dir, ...gdef().modsDir.split('/'));
 // (EML games: each mod keeps its settings in its own folder, mods/<mod>/config.txt - see emlConfig)
 const configDir = () => gdef().loader === 'eml' ? pluginsDir() : path.join(getProfile().dir, 'BepInEx', 'config');
-const statePath = () => path.join(serverDir(srv().id), 'state.json');
-function readState() { const j = srv() ? readJson(statePath(), {}) : {}; return { mods: j.mods || {}, installed: j.installed || [], restartPending: !!j.restartPending, uploaded: j.uploaded || {} }; }
-const writeState = st => writeJson(statePath(), st);
+const statePath = id => path.join(serverDir(id), 'state.json');
+// a state goes back to the server it was read from, whichever is active by then (2026-11-04: a switch to the Valheim
+// server during an Enshrouded sync wrote Enshrouded's state over the Valheim server's)
+function readState() {
+  const id = srv()?.id, j = id ? readJson(statePath(id), {}) : {};
+  const st = { mods: j.mods || {}, installed: j.installed || [], restartPending: !!j.restartPending, uploaded: j.uploaded || {} };
+  Object.defineProperty(st, 'sid', { value: id || null, enumerable: false });
+  return st;
+}
+const writeState = st => { const id = st.sid || srv()?.id; if (id) writeJson(statePath(id), st); };
 
 let job = null;
 function setJob(j) { job = j; send('job', job); if (!j) setImmediate(pump); }
+// a server switch waits for what runs on the current server (a sync, a restart, queued installs): they read the active
+// server's profile, connection and settings as they go
+let serverOps = 0, switchTo = null;
+const serverBusy = () => !!(job || restarting || pumping || queue.length || serverOps);
+function switchWhenFree() {
+  if (!switchTo || serverBusy()) return;
+  const id = switchTo; switchTo = null;
+  if (G.servers.some(s => s.id === id) && id !== G.activeServer) activate(id);
+}
+async function onServer(fn) { serverOps++; try { return await fn(); } finally { serverOps--; setImmediate(switchWhenFree); } }
 
 // ---------- the queue: installs / removals / updates clicked while Bifrost is busy wait their turn ----------
 // (the auto-sync waits for the queue to empty, so many changes go to the server in one sync and one restart)
@@ -503,7 +520,7 @@ async function pump() {
       try { r = await q.run(); } catch (e) { r = { ok: false, error: e.message }; }
       q.resolve(r);
     }
-  } finally { pumping = false; send('queue', queueInfo()); }
+  } finally { pumping = false; send('queue', queueInfo()); setImmediate(switchWhenFree); }
 }
 let progress = null;
 function setProgress(p) { progress = p; send('progress', progress); }
@@ -1179,7 +1196,8 @@ async function syncLoader(tr) {
   if (sent.length) log(`  loader put on the server (${sent.join(', ')})`, 'out');
   return !!(sent.length || stale.length);
 }
-async function syncNow(reason) {
+function syncNow(reason) { return onServer(() => syncNowRun(reason)); }
+async function syncNowRun(reason) {
   const s = srv();
   if (!isAdmin() || !s.conn) return;
   if (job) { toast('Something is already running - waiting for it to finish.'); return; }
@@ -1232,7 +1250,8 @@ async function syncNow(reason) {
 }
 
 // restart only while nobody plays; afterwards configs + list
-async function maybeRestart({ manual, what = '', force } = {}) {
+function maybeRestart(o) { return onServer(() => maybeRestartRun(o)); }
+async function maybeRestartRun({ manual, what = '', force } = {}) {
   if (restarting) return { ok: true, already: true };
   const s = srv(), tr = transport(), st = readState();
   if (!st.restartPending && !force) {
@@ -1321,7 +1340,7 @@ async function restartServer({ fast, recreate } = {}) {
     }
     return { ok: true };
   } finally {
-    restarting = false; watch.restarting = null; send('watch', watch);
+    restarting = false; watch.restarting = null; send('watch', watch); setImmediate(switchWhenFree);
     if (syncAfterRestart) { const why = syncAfterRestart; syncAfterRestart = null; setTimeout(() => syncNow(why), 1500); }
   }
 }
@@ -1890,7 +1909,8 @@ async function saveConfig({ rel, changes, text, expect }) {
   if (now !== next) return { ok: false, error: 'Sincronizarea a adus între timp altă versiune a fișierului de pe server - l-am reîncărcat, fă modificarea din nou.' };
   return { ok: true, pushed: true, canRestart: !!transport()?.canRestart, hash: sha1(next), gameRunning: gameOn };
 }
-async function twoWay(reason) {
+function twoWay(reason) { return onServer(() => twoWayRun(reason)); }
+async function twoWayRun(reason) {
   const s = srv();
   if (!isAdmin() || !s.conn || twoWayBusy || job || restarting || !(s.syncConfigs || s.pullServerMods)) return;
   try { guardConfigs(); } catch (e) { log(`config guard: ${e.message}`, 'error'); }
@@ -1982,7 +2002,8 @@ async function githubToken() {
   if (ghCliToken === undefined) ghCliToken = await new Promise(res => execFile('gh', ['auth', 'token'], { windowsHide: true }, (e, out) => res(e ? null : out.trim() || null)));
   return ghCliToken;
 }
-async function publishList(reason) {
+function publishList(reason) { return onServer(() => publishListRun(reason)); }
+async function publishListRun(reason) {
   const s = srv();
   if (!isAdmin() || listState.busy) return { ok: false, error: 'ocupat' };
   const list = { ...buildList(), updatedAt: Date.now() };
@@ -2341,7 +2362,15 @@ async function action(name, arg) {
     // ----- servers -----
     case 'addServer': return addServer(arg);
     case 'createServer': return createServer(arg);
-    case 'switchServer': if (G.servers.some(x => x.id === arg)) activate(arg); return { ok: true };
+    case 'switchServer': {
+      if (!G.servers.some(x => x.id === arg)) return { ok: false };
+      if (arg === G.activeServer) { switchTo = null; return { ok: true }; }
+      if (!serverBusy()) { switchTo = null; activate(arg); return { ok: true }; }
+      switchTo = arg;
+      const to = G.servers.find(x => x.id === arg).name, from = srv()?.name || '';
+      toast(Lm(`Bifrost termină întâi ce face pe ${from} (sincronizare / repornire), apoi trece singur la ${to}.`, `Bifrost first finishes what it is doing on ${from} (sync / restart), then switches to ${to} by itself.`), 'info');
+      return { ok: true, waiting: true };
+    }
     case 'removeServer': return removeServer(arg);
     case 'localProfiles': return { ok: true, profiles: importers.localProfiles(app.getPath('appData')) };
     case 'testConnection': {
